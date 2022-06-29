@@ -1,0 +1,13 @@
+# go to the python version you are useing or the environement you want to use, e.g.
+cd "C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python38\"
+python.exe -m pip install -r requirements.txt
+# note that requirements.txt will be located in your project directory
+python.exe -m pip install pyinstaller
+
+#cd to back to project directory where zmax_edf_merge_converter.py is located
+#C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python38\Scripts\pyinstaller.exe --noconfirm --hidden-import mne --onefile zmax_edf_merge_converter.py
+#C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python38\python.exe -m PyInstaller --noconfirm --hidden-import mne --onefile zmax_edf_merge_converter.py
+C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python38\python.exe -m PyInstaller --noconfirm --add-data="C:\Users\cleaner\AppData\Local\Programs\Python\Python38\Lib\site-packages\mne;mne" --onefile zmax_edf_merge_converter.py
+#copy from dist the zmax_edf_merge_converter.exe
+RMDIR build /s
+RMDIR dist

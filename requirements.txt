@@ -1,0 +1,4 @@
+mne>=1.0.3
+zipfile36
+pyedflib>=0.1.29
+pyinstaller
