@@ -1,10 +1,10 @@
 ## zmax_edf_merge_converter
-conversion of a folder with zmax EDF files (originally convered using Hypondyne HDRecorder.exe) into a merged European Data Format .EDF (EDF+)
+conversion of a folder with Hypnodyne zmax (wearable) EDF files (originally convered using Hypondyne HDRecorder.exe) into a merged European Data Format .EDF (EDF+)
 - lets you open the EDF file also in other software (because there are often header issues with some channels in the converted .edf files from HDRecorder)
 - without refiltering
 - can read zipped zmax files
 - can write zipped EDF files
-- can reduce the channel set to the light/lite version of the zmax
+- can reduce the channel set to only the ones supported by the light/lite version of the zmax wearable
 
 ### REQUIREMENTS:
 python3.8
@@ -42,5 +42,4 @@ for example:
 ```
 zmax_edf_merge_converter.exe "C:\my\zmax\files\are\in\subfolders\here"
 zmax_edf_merge_converter.exe "C:\my\zmax\files\are\in\subfolders\here" --zmax_light --write_zip --read_zip
-zmax_edf_merge_converter.exe "D:\FW" --zmax_light --write_zip --read_zip
 ```
