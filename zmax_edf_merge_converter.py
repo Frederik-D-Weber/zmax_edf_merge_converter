@@ -54,6 +54,7 @@ import tempfile
 import traceback
 import subprocess
 import logging
+import statistics
 
 # classes #
 
@@ -368,6 +369,12 @@ def dir_path(pathstring):
 			raise NotADirectoryError(pathstring)
 	return None
 
+def dir_path_new(pathstring):
+	pathstring = os.path.normpath(pathstring)
+	if nullable_string(pathstring):
+		return pathstring
+	return None
+
 def file_path(pathstring):
 	pathstring = os.path.normpath(pathstring)
 	if nullable_string(pathstring):
@@ -406,6 +413,11 @@ def find_zmax_files(parentdirpath,readzip=False, zipfile_match_string='', zipfil
 
 	return filepath_list
 
+def path_create(path, isFile=False):
+	if isFile:
+		path, name, extension = fileparts(path)
+	if not os.path.exists(path):
+		os.makedirs(path)
 
 if __name__ == "__main__":
 # Instantiate the argument parser
@@ -414,6 +426,10 @@ if __name__ == "__main__":
 	# Required positional argument
 	parser.add_argument('parent_dir_path', type=dir_path,
 					help='A path to the parent folder where the data is stored and to be initialized')
+
+	# Optional argument
+	parser.add_argument('--write_redirection_path', type=dir_path_new,
+					help='An optional path to redirect writing to a different parent folder (so to not accidentally overwrite other files). Original folder structure is keept in the subfolders.')
 
 	# Switch
 	parser.add_argument('--read_zip', action='store_true',
@@ -429,7 +445,7 @@ if __name__ == "__main__":
 
 	# Switch
 	parser.add_argument('--zmax_ppgparser', action='store_true',
-					help='Switch to indicate if ZMax PPGParser.exe is used to reparse some heart rate related channels')
+					help='Switch to indicate if ZMax PPGParser.exe is used to reparse some heart rate related channels. you also need to specify zmax_ppgparser_exe_path if it is not already in the current directory. This will take time to reprocess each data.')
 
 	# Optional argument
 	parser.add_argument('--zmax_ppgparser_exe_path', type=file_path,
@@ -444,6 +460,10 @@ if __name__ == "__main__":
 					help='Switch to indicate if the device is a ZMax lite version and not all channels have to be included')
 
 	# Switch
+	parser.add_argument('--exclude_empty_channels', action='store_true',
+					help='Switch to indicate if channels that are constant (i.e. empty and likely not recorded) should be excluded/dropped. Requires some more computation time but saves space in case it is not zipped.')
+
+	# Switch
 	parser.add_argument('--write_zip', action='store_true',
 					help='Switch to indicate if the output edfs should be zipped in one .zip file')
 
@@ -456,6 +476,14 @@ if __name__ == "__main__":
 	parentdirpath = pathlib.Path().resolve() # the current working directory
 	if args.parent_dir_path is not None:
 		parentdirpath = args.parent_dir_path
+
+	write_redirection_path = None
+	if args.write_redirection_path is not None:
+		write_redirection_path = args.write_redirection_path
+
+	exclude_empty_channels = False
+	if args.exclude_empty_channels is not None:
+		exclude_empty_channels = args.exclude_empty_channels
 
 	isliteversion = False
 	if args.zmax_lite is not None:
@@ -523,6 +551,7 @@ if __name__ == "__main__":
 		if isliteversion:
 			drop_channels = ['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']
 		try:
+			#reading
 			if read_zip:
 				raw = read_edf_to_raw_zipped(filepath, format="zmax_edf", zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout=zmax_ppgparser_timeout, drop_zmax=drop_channels)
 				export_filepath = path + os.sep + name + "_merged"
@@ -531,6 +560,25 @@ if __name__ == "__main__":
 				export_filepath = pathup + os.sep +  parentfoldername + "_merged"
 			print("READ %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
 
+			if exclude_empty_channels:
+				flat_channel_names = []
+				for iCh, ch_name in enumerate(raw.info['ch_names']):
+					ch_name = raw.info['ch_names'][iCh]
+					nNotFlat = numpy.count_nonzero(raw._data[iCh]-statistics.median(raw._data[iCh])) # this is fastest so far
+					if nNotFlat <= 10:
+						flat_channel_names.append(ch_name)
+				raw.drop_channels(flat_channel_names)
+
+			if write_redirection_path is not None:
+				indFound = export_filepath.find(parentdirpath)
+				if indFound >=0:
+					export_filepath = write_redirection_path + export_filepath[(indFound+len(parentdirpath)):]
+					#if write_zip:
+					path_create(export_filepath,isFile=True)
+					#else:
+					#	path_create(export_filepath,isFile=True)
+
+			#writing
 			if write_zip:
 				export_filepath_final = write_raw_to_edf_zipped(raw, export_filepath + ".zip", format="zmax_edf") # treat as a speacial zmax read EDF for export
 			else:
