@@ -26,6 +26,8 @@ also install the Hypnodyne software suite found in http://hypnodynecorp.com/down
 ```
 
 ### USAGE:
+NOTE that using the default values you can also just drag-and-drop (e.g. in windows explorer) multiple folders and/or zipped ZMax edf files (i.e. the ones that HDRecorder.exe creates in a zip file) onto the
+zmax_edf_merge_converter.exe
 ```
 usage: zmax_edf_merge_converter.exe [-h]
                                     [--write_redirection_path WRITE_REDIRECTION_PATH]
@@ -39,15 +41,16 @@ usage: zmax_edf_merge_converter.exe [-h]
                                     [--zmax_ppgparser_timeout ZMAX_PPGPARSER_TIMEOUT]
                                     [--zmax_lite] [--no_overwrite]
                                     [--exclude_empty_channels] [--write_zip]
-                                    parent_dir_path
+                                    parent_dir_paths [parent_dir_paths ...]
 
 This is useful software to reuse EDF from zmax to repackage the original
 exported EDFs and reparse them if necessary or zip them. Copyright 2022,
 Frederik D. Weber
 
 positional arguments:
-  parent_dir_path       A path to the parent folder where the data is stored
-                        and to be initialized
+  parent_dir_paths      A path or multiple paths to the parent folder where
+                        the data is stored and converted from (and by default
+                        also converted to)
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -63,14 +66,18 @@ optional arguments:
                         to search for. Use the pipe to separate different
                         search/match strings, e.g.
                         --zipfile_match_string="this|that" will search for
-                        "this" and then for "that"
+                        "this" and then for "that". If parent_dir_paths
+                        contains direct paths to .zip files this does not
+                        apply.
   --zipfile_nonmatch_string ZIPFILE_NONMATCH_STRING
                         An optional string to NOT match (i.e. exclude or
                         filter out) after all the zipfile_match_string zip
                         files have been found. Use the pipe to separate
                         different search/match strings, e.g.
                         --zipfile_nonmatch_string="this|that" will search for
-                        "this" and then for "that"
+                        "this" and then for "that". If parent_dir_paths
+                        contains direct paths to .zip files this does not
+                        apply.
   --zmax_ppgparser      Switch to indicate if ZMax PPGParser.exe is used to
                         reparse some heart rate related channels. you also
                         need to specify zmax_ppgparser_exe_path if it is not
@@ -104,6 +111,7 @@ optional arguments:
 EXAMPLES:
 ```
 zmax_edf_merge_converter.exe "C:\my\zmax\files\are\in\subfolders\here"
+zmax_edf_merge_converter.exe "C:\my\zmax\files\are\in\subfolders\here" "C:\my\zmax\files\are\in\subfolders\andhere" "C:\my\zmax\files\are\in\subfolders\andthis.zip"
 zmax_edf_merge_converter.exe "C:\my\zmax\files\are\in\subfolders\here" --zmax_lite --write_zip --read_zip
 zmax_edf_merge_converter.exe "C:\my\zmax\files\are\in\subfolders\here" --zmax_ppgparser --zmax_ppgparser_exe_path="C:\Program Files (x86)\Hypnodyne\ZMax\PPGParser.exe"  --zmax_ppgparser_timeout=1000
 zmax_edf_merge_converter.exe "C:\my\zmax\files\are\in\subfolders\here" --write_zip --exclude_empty_channels --zmax_ppgparser --zmax_ppgparser_exe_path="C:\Program Files (x86)\Hypnodyne\ZMax\PPGParser.exe"  --zmax_ppgparser_timeout=1000

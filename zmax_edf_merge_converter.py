@@ -345,9 +345,12 @@ def read_edf_to_raw_zipped(filepath, format="zmax_edf", zmax_ppgparser=False, zm
 # =============================================================================
 #
 # =============================================================================
-def write_raw_to_edf_zipped(raw, zippath, format="zmax_edf", compresslevel=6):
+def write_raw_to_edf_zipped(raw, zippath, edf_filename=None, format="zmax_edf", compresslevel=6):
 	temp_dir = tempfile.TemporaryDirectory()
-	filepath = temp_dir.name + os.sep + fileparts(zippath)[1] + '.edf'
+	if edf_filename is None:
+		filepath = temp_dir.name + os.sep + fileparts(zippath)[1] + '.edf'
+	else:
+		filepath = temp_dir.name + os.sep + fileparts(edf_filename)[1] + '.edf'
 	write_raw_to_edf(raw, filepath, format)
 	zip_directory(temp_dir.name, zippath, deletefolder=True, compresslevel=compresslevel)
 	safe_zip_dir_cleanup(temp_dir)
@@ -358,6 +361,18 @@ def nullable_string(val):
 	if not val:
 		return None
 	return val
+
+def dir_path_or_file(pathstring):
+	pathstring = os.path.normpath(pathstring)
+	if nullable_string(pathstring):
+		if os.path.isdir(pathstring):
+			return pathstring
+		if os.path.isfile(pathstring):
+			return pathstring
+		else:
+			print("'%s' is not a directory or file" % pathstring)
+			raise NotADirectoryError(pathstring)
+	return None
 
 def dir_path(pathstring):
 	pathstring = os.path.normpath(pathstring)
@@ -425,8 +440,8 @@ if __name__ == "__main__":
 	parser = argparse.ArgumentParser(prog='zmax_edf_merge_converter.exe', description='This is useful software to reuse EDF from zmax to repackage the original exported EDFs and reparse them if necessary or zip them. Copyright 2022, Frederik D. Weber')
 
 	# Required positional argument
-	parser.add_argument('parent_dir_path', type=dir_path,
-					help='A path to the parent folder where the data is stored and to be initialized')
+	parser.add_argument('parent_dir_paths', type=dir_path_or_file,
+					help='A path or multiple paths to the parent folder where the data is stored and converted from (and by default also converted to)', nargs='+')
 
 	# Optional argument
 	parser.add_argument('--write_redirection_path', type=dir_path_new,
@@ -438,11 +453,11 @@ if __name__ == "__main__":
 
 	# Optional argument
 	parser.add_argument('--zipfile_match_string', type=str,
-					help='An optional string to match the name of the zip files to search for. Use the pipe to separate different search/match strings, e.g. --zipfile_match_string=\"this|that\" will search for \"this\" and then for \"that\"')
+					help='An optional string to match the name of the zip files to search for. Use the pipe to separate different search/match strings, e.g. --zipfile_match_string=\"this|that\" will search for \"this\" and then for \"that\". If parent_dir_paths contains direct paths to .zip files this does not apply.')
 
 	# Optional argument
 	parser.add_argument('--zipfile_nonmatch_string', type=str,
-					help='An optional string to NOT match (i.e. exclude or filter out) after all the zipfile_match_string zip files have been found. Use the pipe to separate different search/match strings, e.g. --zipfile_nonmatch_string=\"this|that\" will search for \"this\" and then for \"that\"')
+					help='An optional string to NOT match (i.e. exclude or filter out) after all the zipfile_match_string zip files have been found. Use the pipe to separate different search/match strings, e.g. --zipfile_nonmatch_string=\"this|that\" will search for \"this\" and then for \"that\". If parent_dir_paths contains direct paths to .zip files this does not apply.')
 
 	# Switch
 	parser.add_argument('--zmax_ppgparser', action='store_true',
@@ -486,9 +501,9 @@ if __name__ == "__main__":
 
 	args = parser.parse_args()
 
-	parentdirpath = pathlib.Path().resolve() # the current working directory
-	if args.parent_dir_path is not None:
-		parentdirpath = args.parent_dir_path
+	parent_dir_paths = [pathlib.Path().resolve()] # the current working directory
+	if args.parent_dir_paths is not None:
+		parent_dir_paths = args.parent_dir_paths
 
 	write_redirection_path = None
 	if args.write_redirection_path is not None:
@@ -547,112 +562,135 @@ if __name__ == "__main__":
 	#	exit(0)
 
 	#parentdirpath = sys.argv[1]
+	for parentdirpath in parent_dir_paths:
+		read_zip_temp = read_zip
 
-	try:
-		parentdirpath = dir_path(parentdirpath)
-	except NotADirectoryError:
-		print("argument '%s' is not a directory" %parentdirpath)
-		exit(0)
-	
-	if parentdirpath is None:
-		print("argument '%s' is not parsable" %parentdirpath)
-		exit(0)
-
-	print("Finding file paths...")
-	filepath_list = find_zmax_files(parentdirpath, readzip=read_zip, zipfile_match_string=zipfile_match_string, zipfile_nonmatch_string=zipfile_nonmatch_string)
-	print("FOUND %d matching file paths " % len(filepath_list))
-	for iFn, fn in enumerate(filepath_list):
-		print("%d: %s" % (iFn, fn))
-
-	if len(filepath_list) < 1:
-		print("no zmax edf files found")
-		exit(0)
-
-	number_of_conversions = len(filepath_list)
-	for i, filepath in enumerate(filepath_list):
-		print("PROCESSING %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
-		path, name, extension = fileparts(filepath)
-		parentfoldername = os.path.basename(path)
-		pathup, nametmp, extensiontmp = fileparts(path)
-		drop_channels = []
-		if isliteversion:
-			drop_channels = ['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']
-		try:
-
-			if read_zip:
-				export_filepath = path + os.sep + name + write_name_postfix
+		if os.path.isfile(parentdirpath):
+			p, n, e = fileparts(parentdirpath)
+			if e.lower() == ".zip":
+				read_zip_temp = True
+				filepath_list = [parentdirpath]
 			else:
-				export_filepath = pathup + os.sep +  parentfoldername + write_name_postfix
+				filepath_list = [] # do not process
+				#parentdirpath = p
+			#if e.lower() != ".edf":
+			#	read_zip_temp = False
+			#	parentdirpath = p
 
-			if write_redirection_path is not None:
-				indFound = export_filepath.find(parentdirpath)
-				if indFound >=0:
-					export_filepath = write_redirection_path + export_filepath[(indFound+len(parentdirpath)):]
-					#if write_zip:
-					path_create(export_filepath,isFile=True)
-					#else:
-					#	path_create(export_filepath,isFile=True)
-
-			export_filepath_unfinished = export_filepath + temp_file_postfix
-
-			if write_zip:
-				export_filepath_final_to_rename = export_filepath_unfinished + ".zip"
-			else:
-				export_filepath_final_to_rename = export_filepath_unfinished + ".edf"
-
-			export_filepath_final = export_filepath_final_to_rename.replace(temp_file_postfix,'')
-
-			if no_overwrite:
-				if os.path.exists(export_filepath_final):
-					print('skipping file: %s' % export_filepath_final)
-					continue
-
-			#reading
-			if read_zip:
-				raw = read_edf_to_raw_zipped(filepath, format="zmax_edf", zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout=zmax_ppgparser_timeout, drop_zmax=drop_channels)
-			else:
-				raw = read_edf_to_raw(filepath, format="zmax_edf", zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout=zmax_ppgparser_timeout, drop_zmax = drop_channels)
-			print("READ %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
-
-			if exclude_empty_channels:
-				flat_channel_names = []
-				for iCh, ch_name in enumerate(raw.info['ch_names']):
-					ch_name = raw.info['ch_names'][iCh]
-					nNotFlat = numpy.count_nonzero(raw._data[iCh]-statistics.median(raw._data[iCh])) # this is fastest so far
-					if nNotFlat <= 10:
-						flat_channel_names.append(ch_name)
-				raw.drop_channels(flat_channel_names)
-
-			#writing
-			print("Attempting to write %d of %d: '%s' " % (i+1, number_of_conversions, export_filepath_final))
-			# check again just before writing
-			if no_overwrite:
-				if os.path.exists(export_filepath_final):
-					print('skipping file: %s' % export_filepath_final)
-					continue
-			if write_zip:
-				export_filepath_final_to_rename_2 = write_raw_to_edf_zipped(raw, export_filepath_final_to_rename, format="zmax_edf") # treat as a speacial zmax read EDF for export
-			else:
-				export_filepath_final_to_rename_2 = write_raw_to_edf(raw, export_filepath_final_to_rename, format="zmax_edf")  # treat as a speacial zmax read EDF for export
-
+		else:
 			try:
+				parentdirpath = dir_path(parentdirpath)
+			except NotADirectoryError:
+				print("argument '%s' is not a directory" %parentdirpath)
+				continue #exit(0)
+
+			if parentdirpath is None:
+				print("argument '%s' is not parsable" %parentdirpath)
+				continue #exit(0)
+
+			print("Finding file paths...")
+			filepath_list = find_zmax_files(parentdirpath, readzip=read_zip_temp, zipfile_match_string=zipfile_match_string, zipfile_nonmatch_string=zipfile_nonmatch_string)
+
+		print("FOUND %d matching file paths " % len(filepath_list))
+		for iFn, fn in enumerate(filepath_list):
+			print("%d: %s" % (iFn, fn))
+
+		if len(filepath_list) < 1:
+			print("no zmax edf files found")
+			#exit(0)
+
+		number_of_conversions = len(filepath_list)
+		for i, filepath in enumerate(filepath_list):
+			print("PROCESSING %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
+			path, name, extension = fileparts(filepath)
+			parentfoldername = os.path.basename(path)
+			pathup, nametmp, extensiontmp = fileparts(path)
+			drop_channels = []
+			if isliteversion:
+				drop_channels = ['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']
+			try:
+
+				if read_zip_temp:
+					export_filepath = path + os.sep + name + write_name_postfix
+				else:
+					export_filepath = pathup + os.sep +  parentfoldername + write_name_postfix
+
+				if write_redirection_path is not None:
+					indFound = export_filepath.find(parentdirpath)
+					if indFound >= 0:
+						export_filepath = write_redirection_path + export_filepath[(indFound+len(parentdirpath)):]
+						#if write_zip:
+						path_create(export_filepath,isFile=True)
+						#else:
+						#	path_create(export_filepath,isFile=True)
+
+				export_filepath_unfinished = export_filepath + temp_file_postfix
+
+				if write_zip:
+					export_filepath_final_to_rename = export_filepath_unfinished + ".zip"
+				else:
+					export_filepath_final_to_rename = export_filepath_unfinished + ".edf"
+
+				export_filepath_final = export_filepath_final_to_rename.replace(temp_file_postfix,'')
+
+				if no_overwrite:
+					if os.path.exists(export_filepath_final):
+						print('skipping file: %s' % export_filepath_final)
+						continue
+
+				#reading
+				if read_zip_temp:
+					raw = read_edf_to_raw_zipped(filepath, format="zmax_edf", zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout=zmax_ppgparser_timeout, drop_zmax=drop_channels)
+				else:
+					raw = read_edf_to_raw(filepath, format="zmax_edf", zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout=zmax_ppgparser_timeout, drop_zmax = drop_channels)
+				print("READ %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
+
+				if exclude_empty_channels:
+					flat_channel_names = []
+					for iCh, ch_name in enumerate(raw.info['ch_names']):
+						ch_name = raw.info['ch_names'][iCh]
+						nNotFlat = numpy.count_nonzero(raw._data[iCh]-statistics.median(raw._data[iCh])) # this is fastest so far
+						if nNotFlat <= 10:
+							flat_channel_names.append(ch_name)
+					raw.drop_channels(flat_channel_names)
+
+				#writing
+				print("Attempting to write %d of %d: '%s' " % (i+1, number_of_conversions, export_filepath_final))
 				# check again just before writing
 				if no_overwrite:
-					os.rename(export_filepath_final_to_rename_2, export_filepath_final)
-				else:
 					if os.path.exists(export_filepath_final):
-						os.remove(export_filepath_final)
-					shutil.move(export_filepath_final_to_rename_2, export_filepath_final)
-				print("WROTE %d of %d: '%s' " % (i+1, number_of_conversions, export_filepath_final))
-			except:
-				print('FAILED TO RENAME FINAL FILE %s FROM TEMPORARY FILE: %s' % (export_filepath_final, export_filepath_final_to_rename_2))
-				#finally remove the temporary file if exists
+						print('skipping file: %s' % export_filepath_final)
+						continue
+				if write_zip:
+					export_filepath_final_to_rename_2 = write_raw_to_edf_zipped(raw, export_filepath_final_to_rename, edf_filename=export_filepath_final, format="zmax_edf") # treat as a speacial zmax read EDF for export
+				else:
+					export_filepath_final_to_rename_2 = write_raw_to_edf(raw, export_filepath_final_to_rename, format="zmax_edf")  # treat as a speacial zmax read EDF for export
+
 				try:
-					os.remove(export_filepath_final)
+					# check again just before writing
+					if no_overwrite:
+						os.rename(export_filepath_final_to_rename_2, export_filepath_final)
+					else:
+						if os.path.exists(export_filepath_final):
+							try:
+								os.remove(export_filepath_final)
+							except FileNotFoundError:
+								pass
+						shutil.move(export_filepath_final_to_rename_2, export_filepath_final)
+					print("WROTE %d of %d: '%s' " % (i+1, number_of_conversions, export_filepath_final))
 				except:
-					print('FAILED TO DELETE THE LEFT TEMPORARY FILE: %s' % export_filepath_final_to_rename_2)
+					print('FAILED TO RENAME FINAL FILE %s FROM TEMPORARY FILE: %s' % (export_filepath_final, export_filepath_final_to_rename_2))
+					print(traceback.format_exc())
+					#finally remove the temporary file if exists
+					try:
+						try:
+							os.remove(export_filepath_final_to_rename_2)
+						except FileNotFoundError:
+							pass
+					except:
+						print('FAILED TO DELETE THE LEFT TEMPORARY FILE: %s' % export_filepath_final_to_rename_2)
+						print(traceback.format_exc())
 
-
-		except Exception as e:
-			print(traceback.format_exc())
-			print("FAILED %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
+			except Exception as e:
+				print(traceback.format_exc())
+				print("FAILED %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
