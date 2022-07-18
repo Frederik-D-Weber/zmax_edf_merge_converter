@@ -388,22 +388,23 @@ def file_path(pathstring):
 # =============================================================================
 # 
 # =============================================================================
-def find_zmax_files(parentdirpath,readzip=False, zipfile_match_string='', zipfile_nonmatch_string=''):
+def find_zmax_files(parentdirpath, readzip=False, zipfile_match_string='', zipfile_nonmatch_string=''):
 	"""
 	finds all the zmax data from different wearables in the HB file structure given the parent path to the subject files
 	:param wearable:
 	:return:
 	"""
 	filepath_list = []
-	wearable = 'zmx'
 	if readzip:
-		if zipfile_match_string != '':
-			filepath_list = glob.glob(parentdirpath + os.sep + "**" + os.sep + "*.zip",recursive=True)
-		else:
-			filepath_list = glob.glob(parentdirpath + os.sep + "**" + os.sep + '*' + zipfile_match_string + "*.zip",recursive=True)
+		filepath_list = glob.glob(parentdirpath + os.sep + "**" + os.sep + "*.zip",recursive=True)
 
-		if zipfile_nonmatch_string != '':
-			filter(lambda x: (zipfile_nonmatch_string not in fileparts(x)[1]), filepath_list)
+		if zipfile_match_string != '' or  (zipfile_match_string is None):
+			for include_string in zipfile_match_string.split('|'):
+				filepath_list = list(filter(lambda x: (include_string in fileparts(x)[1]), filepath_list))
+
+		if zipfile_nonmatch_string != '' or  (zipfile_nonmatch_string is None):
+			for exclude_string in zipfile_nonmatch_string.split('|'):
+				filepath_list = list(filter(lambda x: (exclude_string not in fileparts(x)[1]), filepath_list))
 	else:
 		filepath_list = glob.glob(parentdirpath + os.sep + "**" + os.sep + "EEG L.edf",recursive=True)
 
@@ -437,11 +438,11 @@ if __name__ == "__main__":
 
 	# Optional argument
 	parser.add_argument('--zipfile_match_string', type=str,
-					help='An optional string to match the name of the zipfiles to search for using internal glob function')
+					help='An optional string to match the name of the zip files to search for. Use the pipe to separate different search/match strings, e.g. --zipfile_match_string=\"this|that\" will search for \"this\" and then for \"that\"')
 
 	# Optional argument
 	parser.add_argument('--zipfile_nonmatch_string', type=str,
-					help='An optional string to NOT match (i.e. exclude or filter out) after all the zipfile_match_string zipfiles ones have been found')
+					help='An optional string to NOT match (i.e. exclude or filter out) after all the zipfile_match_string zip files have been found. Use the pipe to separate different search/match strings, e.g. --zipfile_nonmatch_string=\"this|that\" will search for \"this\" and then for \"that\"')
 
 	# Switch
 	parser.add_argument('--zmax_ppgparser', action='store_true',
@@ -452,12 +453,24 @@ if __name__ == "__main__":
 					help='direct and full path to the ZMax PPGParser.exe in the Hypnodyne ZMax software folder')
 
 	# Optional argument
+	parser.add_argument('--write_name_postfix', type=str,
+					help='file name post fix for the written files or directories. Default is \"_merged\"')
+
+	# Optional argument
+	parser.add_argument('--temp_file_postfix', type=str,
+					help='file name post fix for the written files or directories that are not completely written yet. Default is \"_TEMP_\"')
+
+	# Optional argument
 	parser.add_argument('--zmax_ppgparser_timeout', type=float,
 					help='An optional timeout to run the ZMax PPGParser.exe in seconds. If empty no timeout is used')
 
 	# Switch
 	parser.add_argument('--zmax_lite', action='store_true',
 					help='Switch to indicate if the device is a ZMax lite version and not all channels have to be included')
+
+	# Switch
+	parser.add_argument('--no_overwrite', action='store_true',
+					help='Switch to indicate if files should be overwritten if existent')
 
 	# Switch
 	parser.add_argument('--exclude_empty_channels', action='store_true',
@@ -509,6 +522,10 @@ if __name__ == "__main__":
 	if args.zmax_ppgparser is not None:
 		zmax_ppgparser = args.zmax_ppgparser
 
+	no_overwrite = False
+	if args.no_overwrite is not None:
+		no_overwrite = args.no_overwrite
+
 	zmax_ppgparser_exe_path = 'PPGParser.exe' # in the current working directory
 	if args.zmax_ppgparser_exe_path is not None:
 		zmax_ppgparser_exe_path = args.zmax_ppgparser_exe_path
@@ -517,7 +534,13 @@ if __name__ == "__main__":
 	if args.zmax_ppgparser_timeout is not None:
 		zmax_ppgparser_timeout = args.zmax_ppgparser_timeout
 
+	write_name_postfix = "_merged"
+	if args.write_name_postfix is not None:
+		write_name_postfix = args.write_name_postfix
 
+	temp_file_postfix = "_TEMP_"
+	if args.temp_file_postfix is not None:
+		temp_file_postfix = args.temp_file_postfix
 
 	#if len(sys.argv) != 3:
 	#	print('expecting path to a parent folders with zmax edfs converted from HDrecorder as the only argument')
@@ -534,9 +557,13 @@ if __name__ == "__main__":
 	if parentdirpath is None:
 		print("argument '%s' is not parsable" %parentdirpath)
 		exit(0)
-	
+
+	print("Finding file paths...")
 	filepath_list = find_zmax_files(parentdirpath, readzip=read_zip, zipfile_match_string=zipfile_match_string, zipfile_nonmatch_string=zipfile_nonmatch_string)
-	
+	print("FOUND %d matching file paths " % len(filepath_list))
+	for iFn, fn in enumerate(filepath_list):
+		print("%d: %s" % (iFn, fn))
+
 	if len(filepath_list) < 1:
 		print("no zmax edf files found")
 		exit(0)
@@ -551,13 +578,40 @@ if __name__ == "__main__":
 		if isliteversion:
 			drop_channels = ['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']
 		try:
+
+			if read_zip:
+				export_filepath = path + os.sep + name + write_name_postfix
+			else:
+				export_filepath = pathup + os.sep +  parentfoldername + write_name_postfix
+
+			if write_redirection_path is not None:
+				indFound = export_filepath.find(parentdirpath)
+				if indFound >=0:
+					export_filepath = write_redirection_path + export_filepath[(indFound+len(parentdirpath)):]
+					#if write_zip:
+					path_create(export_filepath,isFile=True)
+					#else:
+					#	path_create(export_filepath,isFile=True)
+
+			export_filepath_unfinished = export_filepath + temp_file_postfix
+
+			if write_zip:
+				export_filepath_final_to_rename = export_filepath_unfinished + ".zip"
+			else:
+				export_filepath_final_to_rename = export_filepath_unfinished + ".edf"
+
+			export_filepath_final = export_filepath_final_to_rename.replace(temp_file_postfix,'')
+
+			if no_overwrite:
+				if os.path.exists(export_filepath_final):
+					print('skipping file: %s' % export_filepath_final)
+					continue
+
 			#reading
 			if read_zip:
 				raw = read_edf_to_raw_zipped(filepath, format="zmax_edf", zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout=zmax_ppgparser_timeout, drop_zmax=drop_channels)
-				export_filepath = path + os.sep + name + "_merged"
 			else:
 				raw = read_edf_to_raw(filepath, format="zmax_edf", zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout=zmax_ppgparser_timeout, drop_zmax = drop_channels)
-				export_filepath = pathup + os.sep +  parentfoldername + "_merged"
 			print("READ %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
 
 			if exclude_empty_channels:
@@ -569,21 +623,35 @@ if __name__ == "__main__":
 						flat_channel_names.append(ch_name)
 				raw.drop_channels(flat_channel_names)
 
-			if write_redirection_path is not None:
-				indFound = export_filepath.find(parentdirpath)
-				if indFound >=0:
-					export_filepath = write_redirection_path + export_filepath[(indFound+len(parentdirpath)):]
-					#if write_zip:
-					path_create(export_filepath,isFile=True)
-					#else:
-					#	path_create(export_filepath,isFile=True)
-
 			#writing
+			print("Attempting to write %d of %d: '%s' " % (i+1, number_of_conversions, export_filepath_final))
+			# check again just before writing
+			if no_overwrite:
+				if os.path.exists(export_filepath_final):
+					print('skipping file: %s' % export_filepath_final)
+					continue
 			if write_zip:
-				export_filepath_final = write_raw_to_edf_zipped(raw, export_filepath + ".zip", format="zmax_edf") # treat as a speacial zmax read EDF for export
+				export_filepath_final_to_rename_2 = write_raw_to_edf_zipped(raw, export_filepath_final_to_rename, format="zmax_edf") # treat as a speacial zmax read EDF for export
 			else:
-				export_filepath_final = write_raw_to_edf(raw, export_filepath + ".edf", format="zmax_edf")  # treat as a speacial zmax read EDF for export
-			print("WROTE %d of %d: '%s' " % (i+1, number_of_conversions, export_filepath_final))
+				export_filepath_final_to_rename_2 = write_raw_to_edf(raw, export_filepath_final_to_rename, format="zmax_edf")  # treat as a speacial zmax read EDF for export
+
+			try:
+				# check again just before writing
+				if no_overwrite:
+					os.rename(export_filepath_final_to_rename_2, export_filepath_final)
+				else:
+					if os.path.exists(export_filepath_final):
+						os.remove(export_filepath_final)
+					shutil.move(export_filepath_final_to_rename_2, export_filepath_final)
+				print("WROTE %d of %d: '%s' " % (i+1, number_of_conversions, export_filepath_final))
+			except:
+				print('FAILED TO RENAME FINAL FILE %s FROM TEMPORARY FILE: %s' % (export_filepath_final, export_filepath_final_to_rename_2))
+				#finally remove the temporary file if exists
+				try:
+					os.remove(export_filepath_final)
+				except:
+					print('FAILED TO DELETE THE LEFT TEMPORARY FILE: %s' % export_filepath_final_to_rename_2)
+
 
 		except Exception as e:
 			print(traceback.format_exc())
