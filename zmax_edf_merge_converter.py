@@ -51,6 +51,21 @@ else:
 	import zipfile36 as zipfile
 
 import tempfile
+import traceback
+import subprocess
+import logging
+
+# classes #
+
+class StreamToLogger(object):
+	def __init__(self, logger, log_level=logging.INFO):
+		self.logger = logger
+		self.log_level = log_level
+		self.linebuf = ''
+
+	def write(self, buf):
+		for line in buf.rstrip().splitlines():
+			self.logger.log(self.log_level, line.rstrip())
 
 # functions #
 
@@ -97,10 +112,29 @@ def safe_zip_dir_extract(filepath):
 def safe_zip_dir_cleanup(temp_dir):
 	temp_dir.cleanup()
 
+
 # =============================================================================
 #
 # =============================================================================
-def read_edf_to_raw(filepath, preload=True, format="zmax_edf", drop_zmax = ['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI']):
+def raw_prolong_constant(raw, to_n_samples, contant=0, prepend=False):
+	append_samples = to_n_samples - raw.n_times
+
+	#raw_append = mne.io.RawEDF(numpy.full([raw._data.shape[0], append_samples], contant), info=raw.info)
+	raw_append = raw.copy()
+	raw_append.crop(tmin=raw_append.times[0], tmax=raw_append.times[append_samples-1], include_tmax=True, verbose=False)
+	raw_append._data = numpy.full([raw_append._data.shape[0], append_samples], contant)
+	if prepend:
+		raw_append.append([raw])
+		return raw_append
+	else:
+		raw.append([raw_append])
+		return raw
+		#mne.concatenate_raws([raw, raw_append])
+
+# =============================================================================
+#
+# =============================================================================
+def read_edf_to_raw(filepath, preload=True, format="zmax_edf", zmax_ppgparser=False, zmax_ppgparser_exe_path=None, zmax_ppgparser_timeout=None, drop_zmax=['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']):
 	path, name, extension = fileparts(filepath)
 	if (extension).lower() != ".edf":
 		warnings.warn("The filepath " + filepath + " does not seem to be an EDF file.")
@@ -111,21 +145,62 @@ def read_edf_to_raw(filepath, preload=True, format="zmax_edf", drop_zmax = ['BOD
 		This reader is largely similar to the one for edf but gets and assembles all the EDFs in a folder if they are in the zmax data format
 		"""
 		path, name, extension = fileparts(filepath)
-		check_channel_filenames = ['BATT', 'BODY TEMP', 'dX', 'dY', 'dZ', 'EEG L', 'EEG R', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_IR_AC', 'OXY_IR_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI']
+		#check_channel_filenames = ['BATT', 'BODY TEMP', 'dX', 'dY', 'dZ', 'EEG L', 'EEG R', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_IR_AC', 'OXY_IR_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI']
+		check_channel_filenames = ['BATT', 'BODY TEMP', 'dX', 'dY', 'dZ', 'EEG L', 'EEG R', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_IR_AC', 'OXY_IR_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_OXY_IR_AC', 'PARSED_NASAL L', 'PARSED_HR_r', 'PARSED_HR_r_strength', 'PARSED_OXY_R_AC', 'PARSED_HR_ir', 'PARSED_HR_ir_strength']
 		raw_avail_list = []
 		channel_avail_list = []
 		channel_read_list = []
 		for iCh, name in enumerate(check_channel_filenames):
 			checkname = path + os.sep + name + '.edf'
 			if os.path.isfile(checkname):
-				channel_avail_list.append(check_channel_filenames[iCh])
-				if not name in drop_zmax:
-					raw_avail_list.append(read_edf_to_raw(checkname, format="edf"))
-					channel_read_list.append(check_channel_filenames[iCh])
+				channel_avail_list.append(name)
+
+		if zmax_ppgparser and zmax_ppgparser_exe_path is not None:
+			print('ATTEMPT to reparse heart signals using the PPGParser' + filepath)
+			exec_string =  "\"" + zmax_ppgparser_exe_path + "\""
+			for iCh, name in enumerate(channel_avail_list):
+				addfilepath = path + os.sep + name + '.edf'
+				exec_string = exec_string + " " + "\"" + addfilepath + "\""
+			try:
+				subprocess.run(exec_string, shell=False, timeout=zmax_ppgparser_timeout)
+			except:
+				print(traceback.format_exc())
+				print('FAILED to reparse' + filepath)
+			channel_avail_list = []
+			for iCh, name in enumerate(check_channel_filenames):
+				checkname = path + os.sep + name + '.edf'
+				if os.path.isfile(checkname):
+					channel_avail_list.append(name)
+
+		for iCh, name in enumerate(channel_avail_list):
+			if not name in drop_zmax:
+				readfilepath = path + os.sep + name + '.edf'
+				try:
+					raw_read = read_edf_to_raw(readfilepath, format="edf")
+					if 'PARSED_' in name:
+						raw_read.rename_channels({raw_read.info["ch_names"][0]: name})
+					raw_avail_list.append(raw_read)
+					channel_read_list.append(name)
+				except Exception:
+					print(traceback.format_exc())
+					print('FAILED TO read in channel: ' + check_channel_filenames[iCh])
+
 		print("zmax edf channels found:")
 		print(channel_avail_list)
 		print("zmax edf channels read in:")
 		print(channel_read_list)
+
+		if raw_avail_list[0] is not None:
+			nSamples_should = raw_avail_list[0].n_times
+
+		for i, r in enumerate(raw_avail_list):
+			if r is not None:
+				sfreq_temp = r.info['sfreq']
+				if sfreq_temp != 256.0:
+					raw_avail_list[i] = r.resample(256.0)
+					nSamples = raw_avail_list[i].n_times
+					if nSamples < nSamples_should:
+						raw_avail_list[i] = raw_prolong_constant(raw_avail_list[i], nSamples_should, contant=0, prepend=True)
 
 		# append the raws together
 		raw = raw_avail_list[0].add_channels(raw_avail_list[1:])
@@ -166,7 +241,7 @@ def read_edf_to_raw(filepath, preload=True, format="zmax_edf", drop_zmax = ['BOD
 
 		#raw.info['chs'][0]['unit']
 	else:
-		raw = mne.io.read_raw_edf(filepath, preload = True)
+		raw = mne.io.read_raw_edf(filepath, preload=preload)
 	return raw
 
 # =============================================================================
@@ -183,7 +258,7 @@ def write_raw_to_edf(raw, filepath, format="zmax_edf"):
 	if (extension).lower() != ".edf":
 		warnings.warn("The filepath " + filepath + " does not seem to be an EDF file.")
 	if format == "zmax_edf":
-		channel_dimensions_zmax = {'BATT': 'V', 'BODY TEMP': "C", 'dX': "g", 'dY': "g", 'dZ': "g", 'EEG L': "uV", 'EEG R': "uV", 'LIGHT': "", 'NASAL L': "", 'NASAL R': "", 'NOISE': "", 'OXY_DARK_AC': "", 'OXY_DARK_DC': "", 'OXY_IR_AC': "", 'OXY_IR_DC': "", 'OXY_R_AC': "", 'OXY_R_DC': "", 'RSSI': ""}
+		channel_dimensions_zmax = {'BATT': 'V', 'BODY TEMP': "C", 'dX': "g", 'dY': "g", 'dZ': "g", 'EEG L': "uV", 'EEG R': "uV", 'LIGHT': "", 'NASAL L': "", 'NASAL R': "", 'NOISE': "", 'OXY_DARK_AC': "", 'OXY_DARK_DC': "", 'OXY_IR_AC': "", 'OXY_IR_DC': "", 'OXY_R_AC': "", 'OXY_R_DC': "", 'RSSI': "", 'PARSED_NASAL R': "", 'PARSED_OXY_IR_AC': "", 'PARSED_NASAL L': "", 'PARSED_HR_r': "bpm", 'PARSED_HR_r_strength': "", 'PARSED_OXY_R_AC': "", 'PARSED_HR_ir': "bpm", 'PARSED_HR_ir_strength': ""}
 
 		#EDF_format_extention = ".edf"
 		EDF_format_filetype = pyedflib.FILETYPE_EDFPLUS
@@ -215,7 +290,10 @@ def write_raw_to_edf(raw, filepath, format="zmax_edf"):
 
 		for iCh in range(0,nChannels):
 			ch_name = raw.info['ch_names'][iCh]
-			dimension = channel_dimensions_zmax[ch_name] #'uV'
+			try:
+				dimension = channel_dimensions_zmax[ch_name] #'uV'
+			except KeyError:
+				dimension = ""
 			sf = int(round(sfreq))
 			pysical_min = raw._raw_extras[0]['physical_min'][iCh]
 			pysical_max = raw._raw_extras[0]['physical_max'][iCh]
@@ -248,18 +326,18 @@ def write_raw_to_edf(raw, filepath, format="zmax_edf"):
 # =============================================================================
 #
 # =============================================================================
-def read_edf_to_raw_zipped(filepath, format="zmax_edf", drop_zmax=['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI']):
+def read_edf_to_raw_zipped(filepath, format="zmax_edf", zmax_ppgparser=False, zmax_ppgparser_exe_path=None, zmax_ppgparser_timeout=None, drop_zmax=['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']):
 	temp_dir = safe_zip_dir_extract(filepath)
 	raw = None
 	if format == "zmax_edf":
-		raw = read_edf_to_raw(temp_dir.name + os.sep + "EEG L.edf", format=format, drop_zmax=drop_zmax)
+		raw = read_edf_to_raw(temp_dir.name + os.sep + "EEG L.edf", format=format, zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout=zmax_ppgparser_timeout, drop_zmax=drop_zmax)
 	elif format == "edf":
 		fileendings = ('*.edf', '*.EDF')
 		filepath_list_edfs = []
 		for fileending in fileendings:
 			filepath_list_edfs.extend(glob.glob(temp_dir.name + os.sep + fileending,recursive=True))
 		if filepath_list_edfs:
-			raw = read_edf_to_raw(filepath_list_edfs[0], format=format)
+			raw = read_edf_to_raw(filepath_list_edfs[0], format=format, zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout=zmax_ppgparser_timeout)
 	safe_zip_dir_cleanup(temp_dir)
 	return raw
 
@@ -290,10 +368,20 @@ def dir_path(pathstring):
 			raise NotADirectoryError(pathstring)
 	return None
 
+def file_path(pathstring):
+	pathstring = os.path.normpath(pathstring)
+	if nullable_string(pathstring):
+		if os.path.isfile(pathstring):
+			return pathstring
+		else:
+			print("'%s' is not a file" % pathstring)
+			raise NotADirectoryError(pathstring)
+	return None
+
 # =============================================================================
 # 
 # =============================================================================
-def find_zmax_files(parentdirpath,readzip=False):
+def find_zmax_files(parentdirpath,readzip=False, zipfile_match_string='', zipfile_nonmatch_string=''):
 	"""
 	finds all the zmax data from different wearables in the HB file structure given the parent path to the subject files
 	:param wearable:
@@ -302,7 +390,13 @@ def find_zmax_files(parentdirpath,readzip=False):
 	filepath_list = []
 	wearable = 'zmx'
 	if readzip:
-		filepath_list = glob.glob(parentdirpath + os.sep + "**" + os.sep + "*.zip",recursive=True)
+		if zipfile_match_string != '':
+			filepath_list = glob.glob(parentdirpath + os.sep + "**" + os.sep + "*.zip",recursive=True)
+		else:
+			filepath_list = glob.glob(parentdirpath + os.sep + "**" + os.sep + '*' + zipfile_match_string + "*.zip",recursive=True)
+
+		if zipfile_nonmatch_string != '':
+			filter(lambda x: (zipfile_nonmatch_string not in fileparts(x)[1]), filepath_list)
 	else:
 		filepath_list = glob.glob(parentdirpath + os.sep + "**" + os.sep + "EEG L.edf",recursive=True)
 
@@ -315,19 +409,39 @@ def find_zmax_files(parentdirpath,readzip=False):
 
 if __name__ == "__main__":
 # Instantiate the argument parser
-	parser = argparse.ArgumentParser(prog='zmax_edf_merge_converter.exe', description='this is useful software to reuse EDF from zmax')
+	parser = argparse.ArgumentParser(prog='zmax_edf_merge_converter.exe', description='This is useful software to reuse EDF from zmax to repackage the original exported EDFs and reparse them if necessary or zip them. Copyright 2022, Frederik D. Weber')
 
 	# Required positional argument
-	parser.add_argument('parentdirpath', type=dir_path,
+	parser.add_argument('parent_dir_path', type=dir_path,
 					help='A path to the parent folder where the data is stored and to be initialized')
-
-	# Switch
-	parser.add_argument('--zmax_light', action='store_true',
-					help='Switch to indicate if the device is a zmax light/lite version and not all channels have to be included')
 
 	# Switch
 	parser.add_argument('--read_zip', action='store_true',
 					help='Switch to indicate if the input edfs are zipped and end with .zip')
+
+	# Optional argument
+	parser.add_argument('--zipfile_match_string', type=str,
+					help='An optional string to match the name of the zipfiles to search for using internal glob function')
+
+	# Optional argument
+	parser.add_argument('--zipfile_nonmatch_string', type=str,
+					help='An optional string to NOT match (i.e. exclude or filter out) after all the zipfile_match_string zipfiles ones have been found')
+
+	# Switch
+	parser.add_argument('--zmax_ppgparser', action='store_true',
+					help='Switch to indicate if ZMax PPGParser.exe is used to reparse some heart rate related channels')
+
+	# Optional argument
+	parser.add_argument('--zmax_ppgparser_exe_path', type=file_path,
+					help='direct and full path to the ZMax PPGParser.exe in the Hypnodyne ZMax software folder')
+
+	# Optional argument
+	parser.add_argument('--zmax_ppgparser_timeout', type=float,
+					help='An optional timeout to run the ZMax PPGParser.exe in seconds. If empty no timeout is used')
+
+	# Switch
+	parser.add_argument('--zmax_lite', action='store_true',
+					help='Switch to indicate if the device is a ZMax lite version and not all channels have to be included')
 
 	# Switch
 	parser.add_argument('--write_zip', action='store_true',
@@ -335,15 +449,17 @@ if __name__ == "__main__":
 
 
 
+
+
 	args = parser.parse_args()
 
 	parentdirpath = pathlib.Path().resolve() # the current working directory
-	if args.parentdirpath is not None:
-		parentdirpath = args.parentdirpath
+	if args.parent_dir_path is not None:
+		parentdirpath = args.parent_dir_path
 
-	islightversion = False
-	if args.zmax_light is not None:
-		islightversion = args.zmax_light
+	isliteversion = False
+	if args.zmax_lite is not None:
+		isliteversion = args.zmax_lite
 	
 	write_zip = False
 	if args.write_zip is not None:
@@ -352,6 +468,27 @@ if __name__ == "__main__":
 	read_zip = False
 	if args.read_zip is not None:
 		read_zip = args.read_zip
+
+	zipfile_match_string = ''
+	if args.zipfile_match_string is not None:
+		zipfile_match_string = args.zipfile_match_string
+
+	zipfile_nonmatch_string = ''
+	if args.zipfile_nonmatch_string is not None:
+		zipfile_nonmatch_string = args.zipfile_nonmatch_string
+
+	zmax_ppgparser = False
+	if args.zmax_ppgparser is not None:
+		zmax_ppgparser = args.zmax_ppgparser
+
+	zmax_ppgparser_exe_path = 'PPGParser.exe' # in the current working directory
+	if args.zmax_ppgparser_exe_path is not None:
+		zmax_ppgparser_exe_path = args.zmax_ppgparser_exe_path
+
+	zmax_ppgparser_timeout = None # in the current working directory
+	if args.zmax_ppgparser_timeout is not None:
+		zmax_ppgparser_timeout = args.zmax_ppgparser_timeout
+
 
 
 	#if len(sys.argv) != 3:
@@ -370,7 +507,7 @@ if __name__ == "__main__":
 		print("argument '%s' is not parsable" %parentdirpath)
 		exit(0)
 	
-	filepath_list = find_zmax_files(parentdirpath, readzip=read_zip)
+	filepath_list = find_zmax_files(parentdirpath, readzip=read_zip, zipfile_match_string=zipfile_match_string, zipfile_nonmatch_string=zipfile_nonmatch_string)
 	
 	if len(filepath_list) < 1:
 		print("no zmax edf files found")
@@ -383,14 +520,14 @@ if __name__ == "__main__":
 		parentfoldername = os.path.basename(path)
 		pathup, nametmp, extensiontmp = fileparts(path)
 		drop_channels = []
-		if islightversion:
-			drop_channels = ['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI']
+		if isliteversion:
+			drop_channels = ['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']
 		try:
 			if read_zip:
-				raw = read_edf_to_raw_zipped(filepath, format="zmax_edf", drop_zmax=drop_channels)
+				raw = read_edf_to_raw_zipped(filepath, format="zmax_edf", zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout=zmax_ppgparser_timeout, drop_zmax=drop_channels)
 				export_filepath = path + os.sep + name + "_merged"
 			else:
-				raw = read_edf_to_raw(filepath, format="zmax_edf", drop_zmax = drop_channels)
+				raw = read_edf_to_raw(filepath, format="zmax_edf", zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout=zmax_ppgparser_timeout, drop_zmax = drop_channels)
 				export_filepath = pathup + os.sep +  parentfoldername + "_merged"
 			print("READ %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
 
@@ -400,5 +537,6 @@ if __name__ == "__main__":
 				export_filepath_final = write_raw_to_edf(raw, export_filepath + ".edf", format="zmax_edf")  # treat as a speacial zmax read EDF for export
 			print("WROTE %d of %d: '%s' " % (i+1, number_of_conversions, export_filepath_final))
 
-		except:
+		except Exception as e:
+			print(traceback.format_exc())
 			print("FAILED %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
