@@ -55,6 +55,9 @@ import traceback
 import subprocess
 import logging
 import statistics
+import hashlib
+import csv
+import pandas
 
 # classes #
 
@@ -69,6 +72,39 @@ class StreamToLogger(object):
 			self.logger.log(self.log_level, line.rstrip())
 
 # functions #
+
+
+# =============================================================================
+# hashlib.md5 is slower than hashlib.blake2b
+# =============================================================================
+def get_file_hash(filepath, chunk_size_bytes=None, start_chunk=None, stop_chunk=None, hash_function=hashlib.md5):
+	with open(filepath, "rb") as f:
+		if chunk_size_bytes is None:
+			return hash_function(f.read()).hexdigest()
+		else:
+			file_hash = hash_function()
+			chunk = f.read(chunk_size_bytes)
+			iChunk = 1
+			while chunk:
+				if start_chunk is None:
+					if stop_chunk is None:
+						file_hash.update(chunk)
+					else:
+						if stop_chunk <= iChunk:
+							file_hash.update(chunk)
+				else:
+					if start_chunk >= iChunk:
+						if stop_chunk <= iChunk:
+							file_hash.update(chunk)
+				chunk = f.read(chunk_size_bytes)
+				iChunk += 1
+			return file_hash.hexdigest()
+
+# =============================================================================
+# hashlib.md5 is slower than hashlib.blake2b
+# =============================================================================
+def get_raw_data_hash(raw, hash_function=hashlib.md5):
+		return hash_function(raw._data.tobytes()).hexdigest()
 
 # =============================================================================
 #
@@ -135,7 +171,7 @@ def raw_prolong_constant(raw, to_n_samples, contant=0, prepend=False):
 # =============================================================================
 #
 # =============================================================================
-def read_edf_to_raw(filepath, preload=True, format="zmax_edf", zmax_ppgparser=False, zmax_ppgparser_exe_path=None, zmax_ppgparser_timeout=None, drop_zmax=['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']):
+def read_edf_to_raw(filepath, preload=True, format="zmax_edf", zmax_ppgparser=False, zmax_ppgparser_exe_path=None, zmax_ppgparser_timeout_seconds=None, drop_zmax=['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']):
 	path, name, extension = fileparts(filepath)
 	if (extension).lower() != ".edf":
 		warnings.warn("The filepath " + filepath + " does not seem to be an EDF file.")
@@ -163,7 +199,7 @@ def read_edf_to_raw(filepath, preload=True, format="zmax_edf", zmax_ppgparser=Fa
 				addfilepath = path + os.sep + name + '.edf'
 				exec_string = exec_string + " " + "\"" + addfilepath + "\""
 			try:
-				subprocess.run(exec_string, shell=False, timeout=zmax_ppgparser_timeout)
+				subprocess.run(exec_string, shell=False, timeout=zmax_ppgparser_timeout_seconds)
 			except:
 				print(traceback.format_exc())
 				print('FAILED to reparse' + filepath)
@@ -327,18 +363,18 @@ def write_raw_to_edf(raw, filepath, format="zmax_edf"):
 # =============================================================================
 #
 # =============================================================================
-def read_edf_to_raw_zipped(filepath, format="zmax_edf", zmax_ppgparser=False, zmax_ppgparser_exe_path=None, zmax_ppgparser_timeout=None, drop_zmax=['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']):
+def read_edf_to_raw_zipped(filepath, format="zmax_edf", zmax_ppgparser=False, zmax_ppgparser_exe_path=None, zmax_ppgparser_timeout_seconds=None, drop_zmax=['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']):
 	temp_dir = safe_zip_dir_extract(filepath)
 	raw = None
 	if format == "zmax_edf":
-		raw = read_edf_to_raw(temp_dir.name + os.sep + "EEG L.edf", format=format, zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout=zmax_ppgparser_timeout, drop_zmax=drop_zmax)
+		raw = read_edf_to_raw(temp_dir.name + os.sep + "EEG L.edf", format=format, zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout_seconds=zmax_ppgparser_timeout_seconds, drop_zmax=drop_zmax)
 	elif format == "edf":
 		fileendings = ('*.edf', '*.EDF')
 		filepath_list_edfs = []
 		for fileending in fileendings:
 			filepath_list_edfs.extend(glob.glob(temp_dir.name + os.sep + fileending,recursive=True))
 		if filepath_list_edfs:
-			raw = read_edf_to_raw(filepath_list_edfs[0], format=format, zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout=zmax_ppgparser_timeout)
+			raw = read_edf_to_raw(filepath_list_edfs[0], format=format, zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout_seconds=zmax_ppgparser_timeout_seconds)
 	safe_zip_dir_cleanup(temp_dir)
 	return raw
 
@@ -356,6 +392,34 @@ def write_raw_to_edf_zipped(raw, zippath, edf_filename=None, format="zmax_edf", 
 	safe_zip_dir_cleanup(temp_dir)
 	return zippath
 
+# =============================================================================
+#
+# =============================================================================
+def raw_zmax_data_quality(raw):
+		# the last second of Battery voltage
+		quality = None
+		try:
+			quality = statistics.mean(raw.get_data(picks=['BATT'])[0][-256:])
+		except Exception:
+			print(traceback.format_exc())
+		return quality
+
+def get_dir_path(pathstring):
+	pathstring = os.path.normpath(pathstring)
+	if os.path.isdir(pathstring):
+		return pathstring
+	elif os.path.isfile(pathstring):
+		p, n, e = fileparts(pathstring)
+		return p + os.sep + n
+	else:
+		p, n, e = fileparts(pathstring)
+		if e:
+			return p + os.sep + n
+		else:
+			return pathstring
+		print("'%s' is not a file or directory" % pathstring)
+		raise Exception(pathstring)
+	return None
 
 def nullable_string(val):
 	if not val:
@@ -400,10 +464,27 @@ def file_path(pathstring):
 			raise NotADirectoryError(pathstring)
 	return None
 
+def dir_path_create(pathstring):
+	if nullable_string(pathstring):
+		try:
+			pathstring = dir_path(pathstring)
+			return pathstring
+		except NotADirectoryError:
+			try:
+				os.makedirs(pathstring, exist_ok=True)
+				print("Directory '%s' was not existent and was created" %pathstring)
+			except:
+				print("Directory '%s' was could not be created" %pathstring)
+				NotADirectoryError(pathstring)
+			finally:
+				return nullable_string(pathstring)
+	else:
+		return None
+
 # =============================================================================
 # 
 # =============================================================================
-def find_zmax_files(parentdirpath, readzip=False, zipfile_match_string='', zipfile_nonmatch_string=''):
+def find_zmax_files(parentdirpath, readzip=False, zipfile_match_string='', zipfile_nonmatch_string='', find_hyp_files=False):
 	"""
 	finds all the zmax data from different wearables in the HB file structure given the parent path to the subject files
 	:param wearable:
@@ -421,7 +502,10 @@ def find_zmax_files(parentdirpath, readzip=False, zipfile_match_string='', zipfi
 			for exclude_string in zipfile_nonmatch_string.split('|'):
 				filepath_list = list(filter(lambda x: (exclude_string not in fileparts(x)[1]), filepath_list))
 	else:
-		filepath_list = glob.glob(parentdirpath + os.sep + "**" + os.sep + "EEG L.edf",recursive=True)
+		if find_hyp_files:
+			filepath_list = glob.glob(parentdirpath + os.sep + "**" + os.sep + "*.hyp",recursive=True)
+		else:
+			filepath_list = glob.glob(parentdirpath + os.sep + "**" + os.sep + "EEG L.edf",recursive=True)
 
 	# # compatible with python versions < 3.10 remove the root_dir
 	# for i, filepath in enumerate(filepath_list):
@@ -436,7 +520,15 @@ def path_create(path, isFile=False):
 		os.makedirs(path)
 
 if __name__ == "__main__":
-# Instantiate the argument parser
+
+	# determine if application is a script file or frozen exe
+	application_path = ''
+	if getattr(sys, 'frozen', False):
+		application_path = os.path.dirname(sys.executable)
+	elif __file__:
+		application_path = os.path.dirname(__file__)
+
+	# Instantiate the argument parser
 	parser = argparse.ArgumentParser(prog='zmax_edf_merge_converter.exe', description='This is useful software to reuse EDF from zmax to repackage the original exported EDFs and reparse them if necessary or zip them. Copyright 2022, Frederik D. Weber')
 
 	# Required positional argument
@@ -468,6 +560,26 @@ if __name__ == "__main__":
 					help='direct and full path to the ZMax PPGParser.exe in the Hypnodyne ZMax software folder')
 
 	# Optional argument
+	parser.add_argument('--zmax_ppgparser_timeout_seconds', type=float,
+					help='An optional timeout to run the ZMax PPGParser.exe in seconds. If empty no timeout is used')
+
+	# Switch
+	parser.add_argument('--zmax_raw_hyp_file', action='store_true',
+					help='Switch to indicate if ZMax HDRecorder.exe is used to convert from .hyp files moved from the SD card. you need to specify zmax_hdrecorder_exe_path if it is not already in the current directory. This will take time to reprocess each data.')
+
+	# Optional argument
+	parser.add_argument('--zmax_hdrecorder_exe_path', type=file_path,
+					help='direct and full path to the ZMax HDRecorder.exe in the Hypnodyne ZMax software folder')
+
+	# Optional argument
+	parser.add_argument('--zmax_hdrecorder_timeout_seconds', type=float,
+					help='An optional timeout to run the ZMax HDRecorder.exe in seconds. If empty no timeout is used')
+
+	# Switch
+	parser.add_argument('--zmax_raw_hyp_keep_edf', action='store_true',
+					help='Switch to indicate if after conversion with ZMax HDRecorder.exe from .hyp files also the converted .edf files in the subfolders should be kept. Note, this wont apply for zipped .hyp files.')
+
+	# Optional argument
 	parser.add_argument('--write_name_postfix', type=str,
 					help='file name post fix for the written files or directories. Default is \"_merged\"')
 
@@ -476,16 +588,40 @@ if __name__ == "__main__":
 					help='file name post fix for the written files or directories that are not completely written yet. Default is \"_TEMP_\"')
 
 	# Optional argument
-	parser.add_argument('--zmax_ppgparser_timeout', type=float,
-					help='An optional timeout to run the ZMax PPGParser.exe in seconds. If empty no timeout is used')
+	parser.add_argument('--resample_Hz', type=float,
+					help='An optional resample frequency for the written EDF data.')
 
 	# Switch
 	parser.add_argument('--zmax_lite', action='store_true',
 					help='Switch to indicate if the device is a ZMax lite version and not all channels have to be included')
 
 	# Switch
+	parser.add_argument('--read_only_EEG', action='store_true',
+					help='Switch to indicate if onlye "EEG L" and "EEG R" channels should be read in. --zmax_lite switch is invalidated by this')
+
+	# Switch
+	parser.add_argument('--read_only_EEG_BATT', action='store_true',
+					help='Switch to indicate if onlye "EEG L" and "EEG R" and "BATT" channels should be read in. --zmax_lite switch and --read_only_EEG is invalidated by this')
+
+	# Switch
+	parser.add_argument('--no_write', action='store_true',
+					help='Switch to indicate if files should be written out or not.')
+
+	# Switch
 	parser.add_argument('--no_overwrite', action='store_true',
 					help='Switch to indicate if files should be overwritten if existent')
+
+	# Switch
+	parser.add_argument('--no_summary_csv', action='store_true',
+					help='Switch to indicate if a summary file should not be written')
+
+	# Switch
+	parser.add_argument('--no_file_hashing', action='store_true',
+					help='Switch to indicate if the file hash (i.e. MD5 sum) should be calculated (to compare if data is the same for same hash)')
+
+	# Switch
+	parser.add_argument('--no_signal_hashing', action='store_true',
+					help='Switch to indicate if the signal data hash should be calculated (to compare if data is the same for same hash)')
 
 	# Switch
 	parser.add_argument('--exclude_empty_channels', action='store_true',
@@ -494,10 +630,6 @@ if __name__ == "__main__":
 	# Switch
 	parser.add_argument('--write_zip', action='store_true',
 					help='Switch to indicate if the output edfs should be zipped in one .zip file')
-
-
-
-
 
 	args = parser.parse_args()
 
@@ -516,6 +648,14 @@ if __name__ == "__main__":
 	isliteversion = False
 	if args.zmax_lite is not None:
 		isliteversion = args.zmax_lite
+
+	read_only_EEG = False
+	if args.read_only_EEG is not None:
+		read_only_EEG = args.read_only_EEG
+
+	read_only_EEG_BATT = False
+	if args.read_only_EEG_BATT is not None:
+		read_only_EEG_BATT = args.read_only_EEG_BATT
 	
 	write_zip = False
 	if args.write_zip is not None:
@@ -533,21 +673,62 @@ if __name__ == "__main__":
 	if args.zipfile_nonmatch_string is not None:
 		zipfile_nonmatch_string = args.zipfile_nonmatch_string
 
-	zmax_ppgparser = False
-	if args.zmax_ppgparser is not None:
-		zmax_ppgparser = args.zmax_ppgparser
+	no_write = False
+	if args.no_write is not None:
+		no_write = args.no_write
 
 	no_overwrite = False
 	if args.no_overwrite is not None:
 		no_overwrite = args.no_overwrite
 
-	zmax_ppgparser_exe_path = 'PPGParser.exe' # in the current working directory
+	no_summary_csv = False
+	if args.no_summary_csv is not None:
+		no_summary_csv = args.no_summary_csv
+
+	no_file_hashing = False
+	if args.no_file_hashing is not None:
+		no_file_hashing = args.no_file_hashing
+
+	no_signal_hashing = False
+	if args.no_signal_hashing is not None:
+		no_signal_hashing = args.no_signal_hashing
+
+	file_hashing = not no_file_hashing
+	signal_hashing = not no_signal_hashing
+
+	zmax_ppgparser = False
+	if args.zmax_ppgparser is not None:
+		zmax_ppgparser = args.zmax_ppgparser
+
+	zmax_ppgparser_exe_path = application_path + os.sep + 'PPGParser.exe' # in the current working directory
 	if args.zmax_ppgparser_exe_path is not None:
 		zmax_ppgparser_exe_path = args.zmax_ppgparser_exe_path
 
-	zmax_ppgparser_timeout = None # in the current working directory
-	if args.zmax_ppgparser_timeout is not None:
-		zmax_ppgparser_timeout = args.zmax_ppgparser_timeout
+	zmax_ppgparser_timeout_seconds = None # in seconds
+	if args.zmax_ppgparser_timeout_seconds is not None:
+		zmax_ppgparser_timeout_seconds = args.zmax_ppgparser_timeout_seconds
+
+	zmax_raw_hyp_file = False
+	if args.zmax_raw_hyp_file is not None:
+		zmax_raw_hyp_file = args.zmax_raw_hyp_file
+
+	zmax_hdrecorder_exe_path = application_path + os.sep + 'HDRecorder.exe' # in the current working directory
+	if args.zmax_hdrecorder_exe_path is not None:
+		zmax_hdrecorder_exe_path = args.zmax_hdrecorder_exe_path
+
+	hdrecorder_SDConvert_folder_path = fileparts(zmax_hdrecorder_exe_path)[0] + os.sep + 'SDConvert'
+
+	zmax_hdrecorder_timeout_seconds = None # in seconds
+	if args.zmax_hdrecorder_timeout_seconds is not None:
+		zmax_hdrecorder_timeout_seconds = args.zmax_hdrecorder_timeout_seconds
+
+	zmax_raw_hyp_keep_edf = False
+	if args.zmax_raw_hyp_keep_edf is not None:
+		zmax_raw_hyp_keep_edf = args.zmax_raw_hyp_keep_edf
+
+	resample_Hz = None
+	if args.resample_Hz is not None:
+		resample_Hz = args.resample_Hz
 
 	write_name_postfix = "_merged"
 	if args.write_name_postfix is not None:
@@ -561,22 +742,41 @@ if __name__ == "__main__":
 	#	print('expecting path to a parent folders with zmax edfs converted from HDrecorder as the only argument')
 	#	exit(0)
 
+	only_post_process_csv_summary_file = False
+	if not no_summary_csv:
+		filepath_csv_summary_file =  application_path + os.sep + 'zmax_edf_merge_converter_summary_' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S%f") + '.csv'
+
 	#parentdirpath = sys.argv[1]
+	nFileProcessed = 0
+	processing_started = False
 	for parentdirpath in parent_dir_paths:
 		read_zip_temp = read_zip
-
+		zmax_raw_hyp_file_temp = zmax_raw_hyp_file
+		do_find = True
+		filepath_list = []
 		if os.path.isfile(parentdirpath):
 			p, n, e = fileparts(parentdirpath)
 			if e.lower() == ".zip":
 				read_zip_temp = True
 				filepath_list = [parentdirpath]
+				do_find = False
+			elif e.lower() == ".hyp":
+				read_zip_temp = False
+				zmax_raw_hyp_file_temp = True
+				filepath_list = [parentdirpath]
+				do_find = False
+			elif (e.lower() == ".csv") and (len(parent_dir_paths) == 1):
+				filepath_csv_summary_file = parentdirpath
+				only_post_process_csv_summary_file = True
+				do_find = False
+				break
 			else:
-				filepath_list = [] # do not process
+				#filepath_list = [] # do not process
+				continue
 				#parentdirpath = p
 			#if e.lower() != ".edf":
 			#	read_zip_temp = False
 			#	parentdirpath = p
-
 		else:
 			try:
 				parentdirpath = dir_path(parentdirpath)
@@ -588,109 +788,409 @@ if __name__ == "__main__":
 				print("argument '%s' is not parsable" %parentdirpath)
 				continue #exit(0)
 
-			print("Finding file paths...")
-			filepath_list = find_zmax_files(parentdirpath, readzip=read_zip_temp, zipfile_match_string=zipfile_match_string, zipfile_nonmatch_string=zipfile_nonmatch_string)
+			if do_find:
+				print("Finding file paths...")
+				filepath_list = find_zmax_files(parentdirpath, readzip=read_zip_temp, zipfile_match_string=zipfile_match_string, zipfile_nonmatch_string=zipfile_nonmatch_string, find_hyp_files=zmax_raw_hyp_file_temp)
 
 		print("FOUND %d matching file paths " % len(filepath_list))
 		for iFn, fn in enumerate(filepath_list):
 			print("%d: %s" % (iFn, fn))
 
 		if len(filepath_list) < 1:
-			print("no zmax edf files found")
+			print("no zmax files found")
 			#exit(0)
 
 		number_of_conversions = len(filepath_list)
-		for i, filepath in enumerate(filepath_list):
-			print("PROCESSING %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
-			path, name, extension = fileparts(filepath)
-			parentfoldername = os.path.basename(path)
-			pathup, nametmp, extensiontmp = fileparts(path)
-			drop_channels = []
-			if isliteversion:
-				drop_channels = ['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']
-			try:
+		for i, filepath_outer in enumerate(filepath_list):
+			rm_dir_list = []
+			temp_dir_needs_removal = False
+			filepath_ori = filepath_outer
+			cleanup_tempdir_hyp_convert = False
 
+			if not no_summary_csv:
+				if not processing_started:
+					csv_summary_file =  open(filepath_csv_summary_file, 'w', newline='')
+					writer = csv.writer(csv_summary_file, delimiter=',', quoting=csv.QUOTE_NONNUMERIC, escapechar='\\')
+					header_new = ['file_number', 'conversion_status', 'conversion_datetime', 'zmax_file_path_original_outer', 'zmax_file_path_original', 'hash_zmax_file_path_original_md5', 'converted_file_path', 'hash_converted_file_path_md5', 'rec_start_datetime', 'rec_stop_datetime', 'rec_duration_datetime', 'rec_duration_seconds', 'rec_duration_original_samples', 'rec_battery_at_end_voltage', 'hash_signals_before_conversion', 'hash_signals_after_conversion']
+					writer.writerow(header_new)
+					processing_started = True
+
+			print("PROCESSING %d of %d: '%s' " % (i+1, number_of_conversions, filepath_outer))
+
+			conversion_datetime = datetime.datetime.now()#.strftime("%Y-%m-%d %H:%M:%S:%f")
+			read_zip_temp_reset = False
+			filepaths = []
+			export_filepaths = []
+			if zmax_raw_hyp_file_temp and zmax_hdrecorder_exe_path is not None:
+				print('ATTEMPT to convert .hyp file using HDRecorder: ' + filepath_outer)
+				p, n, e = fileparts(filepath_outer)
+				zmax_convert_edf_dir_path = p + os.sep + n
+				filepath_list_hyps = []
 				if read_zip_temp:
-					export_filepath = path + os.sep + name + write_name_postfix
+					read_zip_temp_reset = True
+					try:
+						temp_dir = safe_zip_dir_extract(filepath_outer)
+						temp_dir_needs_removal = True
+						fileendings = ('*.hyp', '*.HYP')
+						for fileending in fileendings:
+							filepath_list_hyps.extend(glob.glob(temp_dir.name + os.sep + "**" + os.sep + fileending, recursive=True))
+						#safe_zip_dir_cleanup(temp_dir)
+					except Exception:
+						print(traceback.format_exc())
+						print('FAILED to convert the zipped hyp files in ' + filepath_outer)
+						break
 				else:
-					export_filepath = pathup + os.sep +  parentfoldername + write_name_postfix
-
-				if write_redirection_path is not None:
-					indFound = export_filepath.find(parentdirpath)
-					if indFound >= 0:
-						export_filepath = write_redirection_path + export_filepath[(indFound+len(parentdirpath)):]
-						#if write_zip:
-						path_create(export_filepath,isFile=True)
-						#else:
-						#	path_create(export_filepath,isFile=True)
-
-				export_filepath_unfinished = export_filepath + temp_file_postfix
-
-				if write_zip:
-					export_filepath_final_to_rename = export_filepath_unfinished + ".zip"
-				else:
-					export_filepath_final_to_rename = export_filepath_unfinished + ".edf"
-
-				export_filepath_final = export_filepath_final_to_rename.replace(temp_file_postfix,'')
-
-				if no_overwrite:
-					if os.path.exists(export_filepath_final):
-						print('skipping file: %s' % export_filepath_final)
-						continue
-
-				#reading
-				if read_zip_temp:
-					raw = read_edf_to_raw_zipped(filepath, format="zmax_edf", zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout=zmax_ppgparser_timeout, drop_zmax=drop_channels)
-				else:
-					raw = read_edf_to_raw(filepath, format="zmax_edf", zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout=zmax_ppgparser_timeout, drop_zmax = drop_channels)
-				print("READ %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
-
-				if exclude_empty_channels:
-					flat_channel_names = []
-					for iCh, ch_name in enumerate(raw.info['ch_names']):
-						ch_name = raw.info['ch_names'][iCh]
-						nNotFlat = numpy.count_nonzero(raw._data[iCh]-statistics.median(raw._data[iCh])) # this is fastest so far
-						if nNotFlat <= 10:
-							flat_channel_names.append(ch_name)
-					raw.drop_channels(flat_channel_names)
-
-				#writing
-				print("Attempting to write %d of %d: '%s' " % (i+1, number_of_conversions, export_filepath_final))
-				# check again just before writing
-				if no_overwrite:
-					if os.path.exists(export_filepath_final):
-						print('skipping file: %s' % export_filepath_final)
-						continue
-				if write_zip:
-					export_filepath_final_to_rename_2 = write_raw_to_edf_zipped(raw, export_filepath_final_to_rename, edf_filename=export_filepath_final, format="zmax_edf") # treat as a speacial zmax read EDF for export
-				else:
-					export_filepath_final_to_rename_2 = write_raw_to_edf(raw, export_filepath_final_to_rename, format="zmax_edf")  # treat as a speacial zmax read EDF for export
-
+					filepath_list_hyps.extend([filepath_outer])
 				try:
-					# check again just before writing
-					if no_overwrite:
-						os.rename(export_filepath_final_to_rename_2, export_filepath_final)
+					for fp in filepath_list_hyps:
+						exec_string =  "\"" + zmax_hdrecorder_exe_path + "\"" + " -conv " + "\"" + fp + "\""
+						subprocess.run(exec_string, shell=False, timeout=zmax_hdrecorder_timeout_seconds)
+
+						if (fileparts(filepath_outer)[2].lower() == ".zip") and read_zip_temp:
+							pp, nn, ee = fileparts(zmax_convert_edf_dir_path + fp.replace(temp_dir.name,""))
+							zmax_convert_edf_dir_path_temp = pp + os.sep + nn + temp_file_postfix
+						else:
+							zmax_convert_edf_dir_path_temp = zmax_convert_edf_dir_path + temp_file_postfix
+						#os.makedirs(zmax_convert_edf_dir_path_temp, exist_ok=True)
+
+						if write_redirection_path is not None:
+							parentdirpath_temp = get_dir_path(parentdirpath)
+							indFound = zmax_convert_edf_dir_path_temp.find(parentdirpath_temp)
+							if indFound >= 0:
+								zmax_convert_edf_dir_path_temp = write_redirection_path + zmax_convert_edf_dir_path_temp[(indFound+len(parentdirpath_temp)):]
+								path_create(zmax_convert_edf_dir_path_temp, isFile=False)
+						try:
+							shutil.rmtree(zmax_convert_edf_dir_path_temp)
+						except Exception:
+							print('FAILED TO DELETE THE LEFT TEMPORARY DIRECTORY: %s' % zmax_convert_edf_dir_path_temp)
+							print(traceback.format_exc())
+						dirpath_add = shutil.move(hdrecorder_SDConvert_folder_path, zmax_convert_edf_dir_path_temp)
+						filepath_add = dirpath_add + os.sep + 'EEG L.edf'
+						fnp, fnn, fne = fileparts(fp)
+						if fileparts(filepath_outer)[2].lower() == ".zip" and read_zip_temp:
+							export_filepath_inner_hyp = pp + os.sep + nn + write_name_postfix
+						else:
+							export_filepath_inner_hyp = p + os.sep + n + write_name_postfix
+						filepaths.append(filepath_add)
+						export_filepaths.append(export_filepath_inner_hyp)
+						cleanup_tempdir_hyp_convert = True
+						rm_dir_list.extend([hdrecorder_SDConvert_folder_path, dirpath_add])
+				except Exception:
+					print(traceback.format_exc())
+					print('FAILED to convert the hyp file ' + filepath_outer)
+					break
+			else:
+				filepaths.append(filepath_outer)
+
+			for iFilePath, filepath in enumerate(filepaths):
+				md5_signal_hash_before_conversion = 'not_computed'
+				md5_file_original_hash = 'not_computed'
+				md5_signal_hash_after_conversion = 'not_computed'
+				md5_file_converted_hash = 'not_computed'
+				rec_start_datetime = 'not_retrieved'
+				rec_stop_datetime = 'not_retrieved'
+				rec_duration_datetime = 'not_retrieved'
+				rec_battery_at_end = 'not_retrieved'
+				conversion_status = 'not_converted'
+				export_filepath_final = ''
+				rec_duration_seconds = None
+				rec_n_samples = None
+				nFileProcessed += 1
+				path, name, extension = fileparts(filepath)
+				parentfoldername = os.path.basename(path)
+				pathup, nametmp, extensiontmp = fileparts(path)
+
+				drop_channels = []
+				if isliteversion:
+					drop_channels = ['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']
+				if read_only_EEG:
+					drop_channels = ['BATT', 'BODY TEMP', 'dX', 'dY', 'dZ', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_IR_AC', 'OXY_IR_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_OXY_IR_AC', 'PARSED_NASAL L', 'PARSED_HR_r', 'PARSED_HR_r_strength', 'PARSED_OXY_R_AC', 'PARSED_HR_ir', 'PARSED_HR_ir_strength']
+				if read_only_EEG_BATT:
+					drop_channels = ['BODY TEMP', 'dX', 'dY', 'dZ', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_IR_AC', 'OXY_IR_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_OXY_IR_AC', 'PARSED_NASAL L', 'PARSED_HR_r', 'PARSED_HR_r_strength', 'PARSED_OXY_R_AC', 'PARSED_HR_ir', 'PARSED_HR_ir_strength']
+				try:
+					if export_filepaths:
+						export_filepath = export_filepaths[iFilePath]
 					else:
+						if read_zip_temp:
+							export_filepath = path + os.sep + name + write_name_postfix
+						else:
+							export_filepath = pathup + os.sep +  parentfoldername + write_name_postfix
+
+					if write_redirection_path is not None:
+						parentdirpath_temp = get_dir_path(parentdirpath)
+						indFound = export_filepath.find(parentdirpath_temp)
+						if indFound >= 0:
+							export_filepath = write_redirection_path + export_filepath[(indFound+len(parentdirpath_temp)):]
+							#if write_zip:
+							path_create(export_filepath, isFile=True)
+							#else:
+							#	path_create(export_filepath,isFile=True)
+
+					export_filepath_unfinished = export_filepath + temp_file_postfix
+
+					if write_zip:
+						export_filepath_final_to_rename = export_filepath_unfinished + ".zip"
+					else:
+						export_filepath_final_to_rename = export_filepath_unfinished + ".edf"
+
+					export_filepath_final = export_filepath_final_to_rename.replace(temp_file_postfix,'')
+
+					if no_overwrite:
 						if os.path.exists(export_filepath_final):
+							print('skipping file: %s' % export_filepath_final)
+							continue
+
+					#reading
+					if read_zip_temp and (not read_zip_temp_reset):
+						raw = read_edf_to_raw_zipped(filepath, format="zmax_edf", zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout_seconds=zmax_ppgparser_timeout_seconds, drop_zmax=drop_channels)
+					else:
+						raw = read_edf_to_raw(filepath, format="zmax_edf", zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout_seconds=zmax_ppgparser_timeout_seconds, drop_zmax = drop_channels)
+					print("READ %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
+					conversion_status = 'read_in'
+
+					# data hashing pre
+					if signal_hashing:
+						print("HASHING SIGNAL OF FILE %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
+						md5_signal_hash_before_conversion = get_raw_data_hash(raw, hash_function=hashlib.md5)
+						print("MD5 SIGNAL HASH: " + md5_signal_hash_before_conversion)
+						#raw_short_ori = raw.copy()
+						#raw_short_ori.crop(tmin=0, tmax=60*4)
+						#md5_signal_hash_before_conversion_short_ori = get_raw_data_hash(raw_short_ori, hash_function=hashlib.md5)
+						#raw_short_crop = raw.copy()
+						#raw_short_crop.crop(tmin=2.671875, tmax=60*4)
+						#md5_signal_hash_before_conversion_short_crop = get_raw_data_hash(raw_short_crop, hash_function=hashlib.md5)
+
+
+					rec_start_datetime = raw.info['meas_date']
+					rec_stop_datetime = rec_start_datetime + datetime.timedelta(seconds=(raw._last_time - raw._first_time))
+					rec_duration_datetime = datetime.timedelta(seconds=(raw._last_time - raw._first_time))
+					rec_duration_seconds = rec_duration_datetime.total_seconds()
+					rec_n_samples = raw.n_times
+					rec_battery_at_end = raw_zmax_data_quality(raw)
+
+					if exclude_empty_channels:
+						flat_channel_names = []
+						for iCh, ch_name in enumerate(raw.info['ch_names']):
+							ch_name = raw.info['ch_names'][iCh]
+							nNotFlat = numpy.count_nonzero(raw._data[iCh]-statistics.median(raw._data[iCh])) # this is fastest so far
+							if nNotFlat <= 10:
+								flat_channel_names.append(ch_name)
+						raw.drop_channels(flat_channel_names)
+
+					if resample_Hz is not None:
+						raw = raw.resample(resample_Hz)
+
+					sampling_rate_final_Hz = raw.info['sfreq']
+
+					# file hashing original
+					if file_hashing:
+						print("HASHING FILE %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
+						md5_file_original_hash = get_file_hash(filepath, chunk_size_bytes=65536, hash_function=hashlib.md5)
+						print("MD5 FILE HASH: " + md5_file_original_hash)
+
+					# data hashing post
+					if signal_hashing:
+						print("HASHING SIGNAL (after conversion) OF FILE %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
+						md5_signal_hash_after_conversion = get_raw_data_hash(raw, hash_function=hashlib.md5)
+						print("MD5 SIGNAL HASH: " + md5_signal_hash_after_conversion)
+
+					conversion_status = 'read_in_processed'
+					#writing
+					#writing
+					if not no_write:
+						# check again just before writing
+						if no_overwrite:
+							if os.path.exists(export_filepath_final):
+								print('skipping file: %s' % export_filepath_final)
+								continue
+						print("Attempting to write %d of %d: '%s' " % (i+1, number_of_conversions, export_filepath_final))
+						if write_zip:
+							export_filepath_final_to_rename_2 = write_raw_to_edf_zipped(raw, export_filepath_final_to_rename, edf_filename=export_filepath_final, format="zmax_edf") # treat as a speacial zmax read EDF for export
+						else:
+							export_filepath_final_to_rename_2 = write_raw_to_edf(raw, export_filepath_final_to_rename, format="zmax_edf")  # treat as a speacial zmax read EDF for export
+						conversion_status = 'read_in_processed_written_temp'
+						try:
+							# check again just before writing
+							if no_overwrite:
+								os.rename(export_filepath_final_to_rename, export_filepath_final)
+							else:
+								if os.path.exists(export_filepath_final):
+									try:
+										os.remove(export_filepath_final)
+									except FileNotFoundError:
+										pass
+								shutil.move(export_filepath_final_to_rename, export_filepath_final)
+							print("WROTE successfully %d of %d: '%s' " % (i+1, number_of_conversions, export_filepath_final))
+							conversion_status = 'read_in_processed_written_converted'
+							# file hashing converted
+							if file_hashing:
+								print("HASHING FILE after conversion %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
+								md5_file_converted_hash = get_file_hash(export_filepath_final, chunk_size_bytes=65536, hash_function=hashlib.md5)
+								print("MD5 FILE after conversion HASH: " + md5_file_converted_hash)
+						except:
+							print('FAILED TO RENAME FINAL FILE %s FROM TEMPORARY FILE' % (export_filepath_final))
+							print(traceback.format_exc())
+							#finally remove the temporary file if exists
+						try:
 							try:
-								os.remove(export_filepath_final)
+								os.remove(export_filepath_final_to_rename)
 							except FileNotFoundError:
 								pass
-						shutil.move(export_filepath_final_to_rename_2, export_filepath_final)
-					print("WROTE %d of %d: '%s' " % (i+1, number_of_conversions, export_filepath_final))
-				except:
-					print('FAILED TO RENAME FINAL FILE %s FROM TEMPORARY FILE: %s' % (export_filepath_final, export_filepath_final_to_rename_2))
+						except:
+							print('FAILED TO DELETE THE LEFT TEMPORARY FILE: %s' % export_filepath_final_to_rename)
+							print(traceback.format_exc())
+
+				except Exception as e:
 					print(traceback.format_exc())
-					#finally remove the temporary file if exists
+					print("FAILED %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
+
+				# write to summary
+				if (not no_summary_csv) and processing_started:
+					row_new = [nFileProcessed, conversion_status, conversion_datetime, filepath_outer, filepath, md5_file_original_hash, export_filepath_final, md5_file_converted_hash, rec_start_datetime, rec_stop_datetime, rec_duration_datetime, rec_duration_seconds, rec_n_samples, rec_battery_at_end, md5_signal_hash_before_conversion, md5_signal_hash_after_conversion]
+					writer.writerow(row_new)
+					csv_summary_file.flush()
+
+			if cleanup_tempdir_hyp_convert and (not zmax_raw_hyp_keep_edf):
+				for dp in rm_dir_list:
 					try:
-						try:
-							os.remove(export_filepath_final_to_rename_2)
-						except FileNotFoundError:
-							pass
-					except:
-						print('FAILED TO DELETE THE LEFT TEMPORARY FILE: %s' % export_filepath_final_to_rename_2)
+						shutil.rmtree(dp)
+					except Exception:
+						print('FAILED TO DELETE THE LEFT TEMPORARY DIRECTORY: %s' % dp)
 						print(traceback.format_exc())
 
-			except Exception as e:
-				print(traceback.format_exc())
-				print("FAILED %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
+			if temp_dir_needs_removal:
+				try:
+					safe_zip_dir_cleanup(temp_dir)
+				except:
+					print('FAILED TO DELETE THE LEFT TEMPORARY DIRECTORY: %s' % temp_dir)
+					print(traceback.format_exc())
+
+	# close summary csv file again
+	if (not no_summary_csv) and (not only_post_process_csv_summary_file) and processing_started:
+		csv_summary_file.close()
+	if (not no_summary_csv) or only_post_process_csv_summary_file:
+		df_csv_in = pandas.read_csv(filepath_csv_summary_file, quoting=csv.QUOTE_NONNUMERIC)
+		df_csv_in.reset_index()  # make sure indexes pair with number of rows
+
+		df_csv_in_by_n_samples = df_csv_in.sort_values(by=['rec_duration_original_samples'],ascending=True)
+		df_csv_in_by_n_samples["duplicates_in_duration"] = numpy.nan
+		df_len = len(df_csv_in_by_n_samples.index)
+		df_csv_in_by_n_samples.reset_index()
+		for iRow in range(0,df_len,1):
+			row = df_csv_in_by_n_samples.iloc[iRow, :]
+			ns = row['rec_duration_original_samples']
+			if (ns is None) or ns is numpy.nan:
+				break
+			for iRow2 in range(iRow+1,df_len,1):
+				row2 = df_csv_in_by_n_samples.iloc[iRow2, :]
+				ns2 = row2['rec_duration_original_samples']
+				if ns2 > (ns + 5*256):
+					break
+				elif ns2 == ns:
+					#print(row.zmax_file_path_original)
+					#print(row2.zmax_file_path_original)
+					df_csv_in_by_n_samples.iloc[iRow, df_csv_in_by_n_samples.columns.get_loc("duplicates_in_duration")] = row2["file_number"]
+					df_csv_in_by_n_samples.iloc[iRow2, df_csv_in_by_n_samples.columns.get_loc("duplicates_in_duration")] = row["file_number"]
+					break
+
+		df_csv_in = df_csv_in_by_n_samples.sort_values(by=['file_number'],ascending=True)
+
+
+		df_csv_in_by_n_samples = df_csv_in.sort_values(by=['rec_duration_original_samples'],ascending=True)
+		df_csv_in_by_n_samples["duplicates_in_duration_different_conversion"] = numpy.nan
+		df_len = len(df_csv_in_by_n_samples.index)
+		df_csv_in_by_n_samples.reset_index()
+		for iRow in range(0,df_len,1):
+			row = df_csv_in_by_n_samples.iloc[iRow, :]
+			ns = row['rec_duration_original_samples']
+			if (ns is None) or ns is numpy.nan:
+				break
+			for iRow2 in range(iRow+1,df_len,1):
+				row2 = df_csv_in_by_n_samples.iloc[iRow2, :]
+				ns2 = row2['rec_duration_original_samples']
+				if ns2 > (ns + 5*256):
+					break
+				elif ns2 == (ns + 5*256):
+					#print(row.zmax_file_path_original)
+					#print(row2.zmax_file_path_original)
+					df_csv_in_by_n_samples.iloc[iRow, df_csv_in_by_n_samples.columns.get_loc("duplicates_in_duration_different_conversion")] = row2["file_number"]
+					df_csv_in_by_n_samples.iloc[iRow2, df_csv_in_by_n_samples.columns.get_loc("duplicates_in_duration_different_conversion")] = row["file_number"]
+					break
+		df_csv_in = df_csv_in_by_n_samples.sort_values(by=['file_number'],ascending=True)
+
+		df_csv_in_by_hash = df_csv_in.sort_values(by=['hash_zmax_file_path_original_md5'],ascending=True)
+		df_csv_in_by_hash["duplicates_in_hash_zmax_file_path_original_md5"] = numpy.nan
+		df_len = len(df_csv_in_by_hash.index)
+		df_csv_in_by_hash.reset_index()
+		for iRow in range(0,df_len,1):
+			row = df_csv_in_by_hash.iloc[iRow, :]
+			hash_string = row['hash_zmax_file_path_original_md5']
+			if (hash_string is None) or (hash_string == 'not_computed'):
+				break
+			for iRow2 in range(iRow+1,df_len,1):
+				row2 = df_csv_in_by_hash.iloc[iRow2, :]
+				hash_string2 = row2['hash_zmax_file_path_original_md5']
+				if hash_string2 == hash_string:
+					df_csv_in_by_hash.iloc[iRow, df_csv_in_by_hash.columns.get_loc("duplicates_in_hash_zmax_file_path_original_md5")] = row2["file_number"]
+					df_csv_in_by_hash.iloc[iRow2, df_csv_in_by_hash.columns.get_loc("duplicates_in_hash_zmax_file_path_original_md5")] = row["file_number"]
+					break
+		df_csv_in = df_csv_in_by_hash.sort_values(by=['file_number'],ascending=True)
+
+		df_csv_in_by_hash = df_csv_in.sort_values(by=['hash_converted_file_path_md5'],ascending=True)
+		df_csv_in_by_hash["duplicates_in_hash_converted_file_path_md5"] = numpy.nan
+		df_len = len(df_csv_in_by_hash.index)
+		df_csv_in_by_hash.reset_index()
+		for iRow in range(0,df_len,1):
+			row = df_csv_in_by_hash.iloc[iRow, :]
+			hash_string = row['hash_converted_file_path_md5']
+			if (hash_string is None) or (hash_string == 'not_computed'):
+				break
+			for iRow2 in range(iRow+1,df_len,1):
+				row2 = df_csv_in_by_hash.iloc[iRow2, :]
+				hash_string2 = row2['hash_converted_file_path_md5']
+				if hash_string2 == hash_string:
+					df_csv_in_by_hash.iloc[iRow, df_csv_in_by_hash.columns.get_loc("duplicates_in_hash_converted_file_path_md5")] = row2["file_number"]
+					df_csv_in_by_hash.iloc[iRow2, df_csv_in_by_hash.columns.get_loc("duplicates_in_hash_converted_file_path_md5")] = row["file_number"]
+					break
+		df_csv_in = df_csv_in_by_hash.sort_values(by=['file_number'],ascending=True)
+
+
+		df_csv_in_by_hash = df_csv_in.sort_values(by=['hash_signals_before_conversion'],ascending=True)
+		df_csv_in_by_hash["duplicates_in_hash_signals_before_conversion"] = numpy.nan
+		df_len = len(df_csv_in_by_hash.index)
+		df_csv_in_by_hash.reset_index()
+		for iRow in range(0,df_len,1):
+			row = df_csv_in_by_hash.iloc[iRow, :]
+			hash_string = row['hash_signals_before_conversion']
+			if (hash_string is None) or (hash_string == 'not_computed'):
+				break
+			for iRow2 in range(iRow+1,df_len,1):
+				row2 = df_csv_in_by_hash.iloc[iRow2, :]
+				hash_string2 = row2['hash_signals_before_conversion']
+				if hash_string2 == hash_string:
+					df_csv_in_by_hash.iloc[iRow, df_csv_in_by_hash.columns.get_loc("duplicates_in_hash_signals_before_conversion")] = row2["file_number"]
+					df_csv_in_by_hash.iloc[iRow2, df_csv_in_by_hash.columns.get_loc("duplicates_in_hash_signals_before_conversion")] = row["file_number"]
+					break
+		df_csv_in = df_csv_in_by_hash.sort_values(by=['file_number'],ascending=True)
+
+		df_csv_in_by_hash = df_csv_in.sort_values(by=['hash_signals_after_conversion'],ascending=True)
+		df_csv_in_by_hash["duplicates_in_hash_signals_after_conversion"] = numpy.nan
+		df_len = len(df_csv_in_by_hash.index)
+		df_csv_in_by_hash.reset_index()
+		for iRow in range(0,df_len,1):
+			row = df_csv_in_by_hash.iloc[iRow, :]
+			hash_string = row['hash_signals_after_conversion']
+			if (hash_string is None) or (hash_string == 'not_computed'):
+				break
+			for iRow2 in range(iRow+1,df_len,1):
+				row2 = df_csv_in_by_hash.iloc[iRow2, :]
+				hash_string2 = row2['hash_signals_after_conversion']
+				if hash_string2 == hash_string:
+					df_csv_in_by_hash.iloc[iRow, df_csv_in_by_hash.columns.get_loc("duplicates_in_hash_signals_after_conversion")] = row2["file_number"]
+					df_csv_in_by_hash.iloc[iRow2, df_csv_in_by_hash.columns.get_loc("duplicates_in_hash_signals_after_conversion")] = row["file_number"]
+					break
+		df_csv_in = df_csv_in_by_hash.sort_values(by=['file_number'],ascending=True)
+
+		df_csv_in.to_csv(filepath_csv_summary_file, mode='w', index=False, header=True, quoting=csv.QUOTE_NONNUMERIC)
+
+		print('finished')
