@@ -30,8 +30,11 @@ also install the Hypnodyne software suite found in http://hypnodynecorp.com/down
 
 ### KNOWN ISSUES:
  - Note that using the --zmax_edfjoin switch of this converter will utilize the EDFJoin.exe from the Hypnodyne Corp. ZMax Software Suite.
-However as of version 2022-08-07 of this ZMax Software Suite, it failed to merge the EDFs signals correctly (the signals seemed scattered and unusable) in test on previous recorded data (also newly converted from .hyp).
-Until this is fixed I would recommend to not use it.
+However versions before 2022-08-11 of this ZMax Software Suite failed to merge the EDFs signals correctly (the signals seemed scattered and unusable) in test on previous recorded data (also newly converted from .hyp).
+Please asure you have the version 2022-08-11 of this ZMax Software Suite.
+Note that EDFJoin.exe created merged/joined files cannot open in the EDFbrowser, because the data record size of the EDFs (that is the size and duration of the written junks) is larger than 10 MByte (likely the record/chunk is the whole length of the recording), when he chunks should be smaller (e.g. 1 s worth of samples) acording to he EDF standard.
+You can still open the EDFJoin.exe created merged/joined files using other software. e.g. SleepTrip.
+Until this is fixed I would not recommend to use it.
 - Legacy .EDF files (i.e. converted by HDRecorder.exe from versions prior to Hypnodyne Corp. ZMax Software Suite version 2022-08-07) have header issues in the 'BODY TEMP.edf' and 'BATT.edf' to properly open with other EDF tools. (this is handled by this software to create correct merged files)
 
 ### USAGE:

@@ -366,7 +366,7 @@ def edfWriteAnnotation(edfWriter, onset_in_seconds, duration_in_seconds, descrip
 # =============================================================================
 #
 # =============================================================================
-def write_raw_to_edf(raw, filepath, format="zmax_edf"):
+def write_raw_to_edf(raw, filepath, format="zmax_edf", deidentify=False):
 	path, name, extension = fileparts(filepath)
 	if (extension).lower() != ".edf":
 		warnings.warn("The filepath " + filepath + " does not seem to be an EDF file.")
@@ -398,7 +398,10 @@ def write_raw_to_edf(raw, filepath, format="zmax_edf"):
 		edfWriter.setGender(0)
 		edfWriter.setBirthdate(datetime.date(2000, 1, 1))
 		#edfWriter.setStartdatetime(datetime.datetime.now())
-		edfWriter.setStartdatetime(raw.info['meas_date'])
+		if deidentify:
+			edfWriter.setStartdatetime(datetime.date(2000, 1, 1))
+		else:
+			edfWriter.setStartdatetime(raw.info['meas_date'])
 		edfWriteAnnotation(edfWriter,0, -1, u"signal_start")
 
 		for iCh in range(0,nChannels):
