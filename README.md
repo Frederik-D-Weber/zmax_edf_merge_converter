@@ -4,28 +4,35 @@ Comprehensive conversion of a folder with Hypnodyne zmax (wearable) EDF files (o
 - without refiltering the original EDFs
 - can use the PPGParser.exe to get heart rate infos and cleaner PARSED signals
 - can use the HDReceroder.exe to directly convert from .hyp files from the microSD card recordings.
+- can use the EDFCleaner.exe to clean the signal from micro SD noise (mainly in the EEG channels at Harmonics of 85.33 Hz if electrode impedance is low/resistance is high).
+- can use the EDFjoin.exe to directly convert join EDFs created by using HDReceroder.exe
 - can read zipped ZMax EDF files
-- can write zipped merged/integrated EDF files
+- can write zipped and merged/integrated EDF files
 - can reduce the channel set to only the ones supported by the 'lite' version of the ZMax wearable
-- exclude channels that are empty or flat
+- exclude channels that are empty or flat (to save space)
 - choose complete folder structures and work in place or export in another copy of the file structure without risk of overwriting
 - choose if you want to overwrite files
 - exclude and include file names in a complex file and folder structure
-- write safe, i.e. only final files are written out (and overwritten, ... handy for restarting the process on a lot of files)
-- find duplicates in signal and files (or duration of the recording, also across different use of HDRecorder versions
+- write safe, i.e. only final files are written out (and overwritten, ... handy for restarting the process on a lot of files), files are written out with a temporary name in a safe location as to not overwrite unintenionally other files right until requested or have "half converted/written" files.
+- find duplicates in the ZMax signals and/or files (or duration of the recording, also across different use of HDRecorder versions)
 
 ### REQUIREMENTS:
-python3.8
+RUN it: Windows 7 and above, x64, to run the zmax_edf_merge_converter.exe
+DEVELOP: python 3.8.9 or above (for compiling and coding)
 
 ### TESTED ON:
-Windows 7, x64
+Windows 7, x64, python 3.8.9
 
 ### INSTALLATION:
-```
 Download the distribution zmax_edf_merge_converter.exe from the repository and see USAGE below
 If you want to uses the PPGparser.exe of HDRecorder.exe to correct some nasal and PPG signals and generate the hear rate signal(s)
 also install the Hypnodyne software suite found in http://hypnodynecorp.com/downloads.php or put the zmax_edf_merge_converter.exe into the same folder.
-```
+
+### KNOWN ISSUES:
+ - Note that using the --zmax_edfjoin switch of this converter will utilize the EDFJoin.exe from the Hypnodyne Corp. ZMax Software Suite.
+However as of version 2022-08-07 of this ZMax Software Suite, it failed to merge the EDFs signals correctly (the signals seemed scattered and unusable) in test on previous recorded data (also newly converted from .hyp).
+Until this is fixed I would recommend to not use it.
+- Legacy .EDF files (i.e. converted by HDRecorder.exe from versions prior to Hypnodyne Corp. ZMax Software Suite version 2022-08-07) have header issues in the 'BODY TEMP.edf' and 'BATT.edf' to properly open with other EDF tools. (this is handled by this software to create correct merged files)
 
 ### USAGE:
 Note that using the default values you can also just drag-and-drop (e.g. in windows explorer) multiple folders and/or zipped ZMax edf files (i.e. the ones that HDRecorder.exe creates, but in a zip file) onto the
@@ -48,6 +55,12 @@ usage: zmax_edf_merge_converter.exe [-h]
                                     [--zmax_ppgparser]
                                     [--zmax_ppgparser_exe_path ZMAX_PPGPARSER_EXE_PATH]
                                     [--zmax_ppgparser_timeout_seconds ZMAX_PPGPARSER_TIMEOUT_SECONDS]
+                                    [--zmax_edfjoin]
+                                    [--zmax_edfjoin_exe_path ZMAX_EDFJOIN_EXE_PATH]
+                                    [--zmax_edfjoin_timeout_seconds ZMAX_EDFJOIN_TIMEOUT_SECONDS]
+                                    [--zmax_eegcleaner]
+                                    [--zmax_eegcleaner_exe_path ZMAX_EEGCLEANER_EXE_PATH]
+                                    [--zmax_eegcleaner_timeout_seconds ZMAX_EEGCLEANER_TIMEOUT_SECONDS]
                                     [--zmax_raw_hyp_file]
                                     [--zmax_hdrecorder_exe_path ZMAX_HDRECORDER_EXE_PATH]
                                     [--zmax_hdrecorder_timeout_seconds ZMAX_HDRECORDER_TIMEOUT_SECONDS]
@@ -108,6 +121,32 @@ optional arguments:
   --zmax_ppgparser_timeout_seconds ZMAX_PPGPARSER_TIMEOUT_SECONDS
                         An optional timeout to run the ZMax PPGParser.exe in
                         seconds. If empty no timeout is used
+  --zmax_edfjoin        Switch to indicate if ZMax EDFJoin.exe is used to
+                        merge the converted ZMax EDF files. you also need to
+                        specify zmax_edfjoin_exe_path if it is not already in
+                        the current directory. This will take time to
+                        reprocess each data. Note that this will disable
+                        resampling or cleaning of empty channels or some skip
+                        some values in an entry of the summary csv
+  --zmax_edfjoin_exe_path ZMAX_EDFJOIN_EXE_PATH
+                        direct and full path to the ZMax EDFJoin.exe in the
+                        Hypnodyne ZMax software folder
+  --zmax_edfjoin_timeout_seconds ZMAX_EDFJOIN_TIMEOUT_SECONDS
+                        An optional timeout to run the ZMax EDFJoin.exe in
+                        seconds. If empty no timeout is used
+  --zmax_eegcleaner     Switch to indicate if ZMax EDFCleaner.exe is used to
+                        clean the EEG channels from SD-card writing noise in
+                        85.33 Hz and higher and lower harmonics (e.g. 42.66,
+                        21.33, 10.66, 5.33 Hz...) you also need to specify
+                        zmax_eegcleaner_exe_path if it is not already in the
+                        current directory. This will take time to reprocess
+                        each data.
+  --zmax_eegcleaner_exe_path ZMAX_EEGCLEANER_EXE_PATH
+                        direct and full path to the ZMax EDFCleaner.exe in the
+                        Hypnodyne ZMax software folder
+  --zmax_eegcleaner_timeout_seconds ZMAX_EEGCLEANER_TIMEOUT_SECONDS
+                        An optional timeout to run the ZMax EDFCleaner.exe in
+                        seconds. If empty no timeout is used
   --zmax_raw_hyp_file   Switch to indicate if ZMax HDRecorder.exe is used to
                         convert from .hyp files moved from the SD card. you
                         need to specify zmax_hdrecorder_exe_path if it is not
@@ -136,10 +175,10 @@ optional arguments:
                         data.
   --zmax_lite           Switch to indicate if the device is a ZMax lite
                         version and not all channels have to be included
-  --read_only_EEG       Switch to indicate if onlye "EEG L" and "EEG R"
+  --read_only_EEG       Switch to indicate if only "EEG L" and "EEG R"
                         channels should be read in. --zmax_lite switch is
                         invalidated by this
-  --read_only_EEG_BATT  Switch to indicate if onlye "EEG L" and "EEG R" and
+  --read_only_EEG_BATT  Switch to indicate if only "EEG L" and "EEG R" and
                         "BATT" channels should be read in. --zmax_lite switch
                         and --read_only_EEG is invalidated by this
   --no_write            Switch to indicate if files should be written out or
@@ -172,6 +211,11 @@ zmax_edf_merge_converter.exe "C:\my\zmax\files\are\in\subfolders\here" --write_z
 zmax_edf_merge_converter.exe "C:\my\zmax\files\are\in\subfolders\here" --write_redirection_path="C:\and\shall\be\written\here\with\original\folder\structure" --write_zip --exclude_empty_channels --zmax_ppgparser --zmax_ppgparser_exe_path="C:\Program Files (x86)\Hypnodyne\ZMax\PPGParser.exe"  --zmax_ppgparser_timeout=1000
 zmax_edf_merge_converter.exe "C:\my\zmax\files\are\in\subfolders\here" --write_redirection_path="C:\and\shall\be\written\here\with\original\folder\structure" --no_overwrite --temp_file_postfix="_TEMP_" --zipfile_match_string="_wrb_zmx_" --zipfile_nonmatch_string="_merged|_raw| - empty|_TEMP_" --exclude_empty_channels --zmax_lite --read_zip --write_zip --zmax_ppgparser --zmax_ppgparser_exe_path="C:\Program Files (x86)\Hypnodyne\ZMax\PPGParser.exe" --zmax_ppgparser_timeout=1000
 ```
+
+### CHECKING OF RESULTS
+To check the merged files use EDFbrowser from https://www.teuniz.net/edfbrowser/
+Some analysis on merged EDFs can be done using https://github.com/Frederik-D-Weber/sleeptrip or https://raphaelvallat.com/yasa/build/html/index.html
+LibreOffice (Calc) http://www.libreoffice.org/ can be used for opening the summary files and convert to Excel files if necessary.
 
 ### DUPLICATES
 

@@ -119,6 +119,18 @@ def fileparts(filepath):
 	extension = name_extension[1]
 	return path, name, extension
 
+
+
+# =============================================================================
+#
+# =============================================================================
+def zip_file(filepath, zippath, deletefile=False, compresslevel=6):
+	with zipfile.ZipFile(zippath, mode='w') as zf:
+		len_dir_path = len(fileparts(filepath)[0])
+		zf.write(filepath, filepath[len_dir_path:], compress_type=zipfile.ZIP_DEFLATED, compresslevel=compresslevel)
+	if deletefile:
+		os.remove(filepath)
+	return zippath
 # =============================================================================
 #
 # =============================================================================
@@ -129,8 +141,9 @@ def zip_directory(folderpath, zippath, deletefolder=False, compresslevel=6):
 			for file in files:
 				filepath = os.path.join(root, file)
 				zf.write(filepath, filepath[len_dir_path:], compress_type=zipfile.ZIP_DEFLATED, compresslevel=compresslevel)
-	if not deletefolder:
+	if deletefolder:
 		shutil.rmtree(folderpath)
+	return zippath
 
 # =============================================================================
 #
@@ -168,22 +181,24 @@ def raw_prolong_constant(raw, to_n_samples, contant=0, prepend=False):
 		return raw
 		#mne.concatenate_raws([raw, raw_append])
 
+def get_check_channel_filenames():
+	return ['BATT', 'BODY TEMP', 'dX', 'dY', 'dZ', 'EEG L', 'EEG R', 'EEG R Cleaned', 'EEG L Cleaned', 'EEG R Cleaned_LFP', 'EEG L Cleaned_LFP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_IR_AC', 'OXY_IR_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_OXY_IR_AC', 'PARSED_NASAL L', 'PARSED_HR_r', 'PARSED_HR_r_strength', 'PARSED_OXY_R_AC', 'PARSED_HR_ir', 'PARSED_HR_ir_strength']
+
 # =============================================================================
 #
 # =============================================================================
-def read_edf_to_raw(filepath, preload=True, format="zmax_edf", zmax_ppgparser=False, zmax_ppgparser_exe_path=None, zmax_ppgparser_timeout_seconds=None, drop_zmax=['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']):
+def read_edf_to_raw(filepath, preload=True, format="zmax_edf", zmax_ppgparser=False, zmax_ppgparser_exe_path=None, zmax_ppgparser_timeout_seconds=None, zmax_eegcleaner=False, zmax_eegcleaner_exe_path=None, zmax_eegcleaner_timeout_seconds=None, zmax_edfjoin_exe_path=None, zmax_edfjoin_timeout_seconds=None, zmax_edfjoin_keep=False, zmax_edfjoin_move_path=None, no_read=False, drop_zmax=['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']):
 	path, name, extension = fileparts(filepath)
 	if (extension).lower() != ".edf":
 		warnings.warn("The filepath " + filepath + " does not seem to be an EDF file.")
 	raw = None
-	if format == "zmax_edf":
+	if format in ["zmax_edf", "zmax_edf_join"]:
 
 		"""
 		This reader is largely similar to the one for edf but gets and assembles all the EDFs in a folder if they are in the zmax data format
 		"""
 		path, name, extension = fileparts(filepath)
-		#check_channel_filenames = ['BATT', 'BODY TEMP', 'dX', 'dY', 'dZ', 'EEG L', 'EEG R', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_IR_AC', 'OXY_IR_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI']
-		check_channel_filenames = ['BATT', 'BODY TEMP', 'dX', 'dY', 'dZ', 'EEG L', 'EEG R', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_IR_AC', 'OXY_IR_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_OXY_IR_AC', 'PARSED_NASAL L', 'PARSED_HR_r', 'PARSED_HR_r_strength', 'PARSED_OXY_R_AC', 'PARSED_HR_ir', 'PARSED_HR_ir_strength']
+		check_channel_filenames = get_check_channel_filenames()
 		raw_avail_list = []
 		channel_avail_list = []
 		channel_read_list = []
@@ -192,89 +207,150 @@ def read_edf_to_raw(filepath, preload=True, format="zmax_edf", zmax_ppgparser=Fa
 			if os.path.isfile(checkname):
 				channel_avail_list.append(name)
 
+		reprocessed = False
 		if zmax_ppgparser and zmax_ppgparser_exe_path is not None:
-			print('ATTEMPT to reparse heart signals using the PPGParser' + filepath)
+			print('ATTEMPT to reparse heart signals using the PPGParser ' + filepath)
 			exec_string =  "\"" + zmax_ppgparser_exe_path + "\""
 			for iCh, name in enumerate(channel_avail_list):
 				addfilepath = path + os.sep + name + '.edf'
 				exec_string = exec_string + " " + "\"" + addfilepath + "\""
 			try:
+				reprocessed = True
 				subprocess.run(exec_string, shell=False, timeout=zmax_ppgparser_timeout_seconds)
 			except:
 				print(traceback.format_exc())
-				print('FAILED to reparse' + filepath)
+				print('FAILED to reparse ' + filepath)
+
+
+		if zmax_eegcleaner and zmax_eegcleaner_exe_path is not None:
+			print('ATTEMPT to clean the EEG signals using the EDFCleaner ' + filepath)
+			exec_string =  "\"" + zmax_eegcleaner_exe_path + "\""
+			hasEEG = False
+			for iCh, name in enumerate(channel_avail_list):
+				if name in ['EEG L', 'EEG R']:
+					hasEEG = True
+					addfilepath = path + os.sep + name + '.edf'
+					exec_string = exec_string + " " + "\"" + addfilepath + "\""
+			try:
+				if hasEEG:
+					reprocessed = True
+					subprocess.run(exec_string, shell=False, timeout=zmax_eegcleaner_timeout_seconds)
+			except:
+				print(traceback.format_exc())
+				print('FAILED to clean EEG from ' + filepath)
+
+		if reprocessed:
 			channel_avail_list = []
 			for iCh, name in enumerate(check_channel_filenames):
 				checkname = path + os.sep + name + '.edf'
 				if os.path.isfile(checkname):
 					channel_avail_list.append(name)
 
-		for iCh, name in enumerate(channel_avail_list):
-			if not name in drop_zmax:
-				readfilepath = path + os.sep + name + '.edf'
+		if format == "zmax_edf_join":
+			joined_filepath = None
+			if channel_avail_list:
+				print('ATTEMPT to join the EDF signals using the EDFJoin ' + filepath)
+				hasChannel = False
+				exec_string =  "\"" + zmax_edfjoin_exe_path + "\""
+				for iCh, name in enumerate(channel_avail_list):
+					if not name in drop_zmax:
+						hasChannel = True
+						addfilepath = path + os.sep + name + '.edf'
+						exec_string = exec_string + " " + "\"" + addfilepath + "\""
 				try:
-					raw_read = read_edf_to_raw(readfilepath, format="edf")
-					if 'PARSED_' in name:
-						raw_read.rename_channels({raw_read.info["ch_names"][0]: name})
-					raw_avail_list.append(raw_read)
-					channel_read_list.append(name)
-				except Exception:
+					if hasChannel:
+						subprocess.run(exec_string, shell=False, timeout=zmax_edfjoin_timeout_seconds)
+						#joined_filepath = path + os.sep + 'out.EDF'
+						joined_filepath = os.path.abspath(os.getcwd()) + os.sep + 'out.EDF'
+						if not no_read:
+							raw = mne.io.read_raw_edf(joined_filepath, preload=preload)
+						if zmax_edfjoin_move_path != None:
+							try:
+								joined_filepath_moved = shutil.move(joined_filepath, zmax_edfjoin_move_path)
+								zmax_edfjoin_keep = False
+								joined_filepath = joined_filepath_moved
+							except Exception:
+								print('FAILED TO MOVE THE file %s to %s' % (joined_filepath, zmax_edfjoin_move_path))
+								print(traceback.format_exc())
+							if no_read:
+								return joined_filepath
+						if not zmax_edfjoin_keep:
+							if os.path.exists(joined_filepath):
+								try:
+									os.remove(joined_filepath)
+								except FileNotFoundError:
+									pass
+				except:
 					print(traceback.format_exc())
-					print('FAILED TO read in channel: ' + check_channel_filenames[iCh])
+					print('FAILED to join ZMax EDF files from ' + filepath)
 
-		print("zmax edf channels found:")
-		print(channel_avail_list)
-		print("zmax edf channels read in:")
-		print(channel_read_list)
+		elif format == "zmax_edf":
+			for iCh, name in enumerate(channel_avail_list):
+				if not name in drop_zmax:
+					readfilepath = path + os.sep + name + '.edf'
+					try:
+						raw_read = read_edf_to_raw(readfilepath, format="edf")
+						if 'PARSED_' in name:
+							raw_read.rename_channels({raw_read.info["ch_names"][0]: name})
+						raw_avail_list.append(raw_read)
+						channel_read_list.append(name)
+					except Exception:
+						print(traceback.format_exc())
+						print('FAILED TO read in channel: ' + check_channel_filenames[iCh])
 
-		if raw_avail_list[0] is not None:
-			nSamples_should = raw_avail_list[0].n_times
+			print("zmax edf channels found:")
+			print(channel_avail_list)
+			print("zmax edf channels read in:")
+			print(channel_read_list)
 
-		for i, r in enumerate(raw_avail_list):
-			if r is not None:
-				sfreq_temp = r.info['sfreq']
-				if sfreq_temp != 256.0:
-					raw_avail_list[i] = r.resample(256.0)
-					nSamples = raw_avail_list[i].n_times
-					if nSamples < nSamples_should:
-						raw_avail_list[i] = raw_prolong_constant(raw_avail_list[i], nSamples_should, contant=0, prepend=True)
+			if raw_avail_list[0] is not None:
+				nSamples_should = raw_avail_list[0].n_times
 
-		# append the raws together
-		raw = raw_avail_list[0].add_channels(raw_avail_list[1:])
+			for i, r in enumerate(raw_avail_list):
+				if r is not None:
+					sfreq_temp = r.info['sfreq']
+					if sfreq_temp != 256.0:
+						raw_avail_list[i] = r.resample(256.0)
+						nSamples = raw_avail_list[i].n_times
+						if nSamples < nSamples_should:
+							raw_avail_list[i] = raw_prolong_constant(raw_avail_list[i], nSamples_should, contant=0, prepend=True)
 
-		# also append the units as this is not handled by raw.add_channels
-		raw._raw_extras[0]['cal'] = [].append(raw._raw_extras[0]['cal'])
-		for r in raw_avail_list[1:]:
-			raw._orig_units.update(r._orig_units)
-			ch_name = r._raw_extras[0]['ch_names'][0]
-			raw._raw_extras[0]['cal'] = numpy.append(raw._raw_extras[0]['cal'],r._raw_extras[0]['cal'])
-			raw._raw_extras[0]['ch_names'].append(r._raw_extras[0]['ch_names'])
-			raw._raw_extras[0]['ch_types'].append(r._raw_extras[0]['ch_types'])
-			if ch_name in ['EEG L', 'EEG R']:
-				raw._raw_extras[0]['digital_max'] = numpy.append(raw._raw_extras[0]['digital_max'],32767)
-				raw._raw_extras[0]['physical_max'] = numpy.append(raw._raw_extras[0]['physical_max'],1976)
-				try: # as in nme this is deleted while reading in
-					raw._raw_extras[0]['digital_min'] = numpy.append(raw._raw_extras[0]['digital_min'],-32767)
-					raw._raw_extras[0]['physical_min'] = numpy.append(raw._raw_extras[0]['physical_min'],-1976)
-				except:
-					pass
-			else:
-				raw._raw_extras[0]['digital_max'] = numpy.append(raw._raw_extras[0]['digital_max'],r._raw_extras[0]['digital_max'])
-				raw._raw_extras[0]['physical_max'] = numpy.append(raw._raw_extras[0]['physical_max'],r._raw_extras[0]['physical_max'])
-				try: # as in nme this is deleted while reading in
-					raw._raw_extras[0]['digital_min'] = numpy.append(raw._raw_extras[0]['digital_min'],r._raw_extras[0]['digital_min'])
-					raw._raw_extras[0]['physical_min'] = numpy.append(raw._raw_extras[0]['physical_min'],r._raw_extras[0]['physical_min'])
-				except:
-					pass
-			raw._raw_extras[0]['highpass'] = numpy.append(raw._raw_extras[0]['highpass'],r._raw_extras[0]['highpass'])
-			raw._raw_extras[0]['lowpass'] = numpy.append(raw._raw_extras[0]['lowpass'],r._raw_extras[0]['lowpass'])
-			raw._raw_extras[0]['n_samps'] = numpy.append(raw._raw_extras[0]['n_samps'],r._raw_extras[0]['n_samps'])
-			raw._raw_extras[0]['offsets'] = numpy.append(raw._raw_extras[0]['offsets'],r._raw_extras[0]['offsets'])
-			raw._raw_extras[0]['units'] = numpy.append(raw._raw_extras[0]['units'],r._raw_extras[0]['units'])
+			# append the raws together
+			raw = raw_avail_list[0].add_channels(raw_avail_list[1:])
 
-		raw._raw_extras[0]['sel'] = range(channel_avail_list.__len__())
-		raw._raw_extras[0]['n_chan'] = channel_avail_list.__len__()
-		raw._raw_extras[0]['orig_n_chan'] = channel_avail_list.__len__()
+			# also append the units as this is not handled by raw.add_channels
+			raw._raw_extras[0]['cal'] = [].append(raw._raw_extras[0]['cal'])
+			for r in raw_avail_list[1:]:
+				raw._orig_units.update(r._orig_units)
+				ch_name = r._raw_extras[0]['ch_names'][0]
+				raw._raw_extras[0]['cal'] = numpy.append(raw._raw_extras[0]['cal'],r._raw_extras[0]['cal'])
+				raw._raw_extras[0]['ch_names'].append(r._raw_extras[0]['ch_names'])
+				raw._raw_extras[0]['ch_types'].append(r._raw_extras[0]['ch_types'])
+				if ch_name in ['EEG L', 'EEG R', 'EEG R Cleaned', 'EEG L Cleaned', 'EEG R Cleaned_LFP', 'EEG L Cleaned_LFP']:
+					raw._raw_extras[0]['digital_max'] = numpy.append(raw._raw_extras[0]['digital_max'],32767)
+					raw._raw_extras[0]['physical_max'] = numpy.append(raw._raw_extras[0]['physical_max'],1976)
+					try: # as in nme this is deleted while reading in
+						raw._raw_extras[0]['digital_min'] = numpy.append(raw._raw_extras[0]['digital_min'],-32767)
+						raw._raw_extras[0]['physical_min'] = numpy.append(raw._raw_extras[0]['physical_min'],-1976)
+					except:
+						pass
+				else:
+					raw._raw_extras[0]['digital_max'] = numpy.append(raw._raw_extras[0]['digital_max'],r._raw_extras[0]['digital_max'])
+					raw._raw_extras[0]['physical_max'] = numpy.append(raw._raw_extras[0]['physical_max'],r._raw_extras[0]['physical_max'])
+					try: # as in nme this is deleted while reading in
+						raw._raw_extras[0]['digital_min'] = numpy.append(raw._raw_extras[0]['digital_min'],r._raw_extras[0]['digital_min'])
+						raw._raw_extras[0]['physical_min'] = numpy.append(raw._raw_extras[0]['physical_min'],r._raw_extras[0]['physical_min'])
+					except:
+						pass
+				raw._raw_extras[0]['highpass'] = numpy.append(raw._raw_extras[0]['highpass'],r._raw_extras[0]['highpass'])
+				raw._raw_extras[0]['lowpass'] = numpy.append(raw._raw_extras[0]['lowpass'],r._raw_extras[0]['lowpass'])
+				raw._raw_extras[0]['n_samps'] = numpy.append(raw._raw_extras[0]['n_samps'],r._raw_extras[0]['n_samps'])
+				raw._raw_extras[0]['offsets'] = numpy.append(raw._raw_extras[0]['offsets'],r._raw_extras[0]['offsets'])
+				raw._raw_extras[0]['units'] = numpy.append(raw._raw_extras[0]['units'],r._raw_extras[0]['units'])
+
+			raw._raw_extras[0]['sel'] = range(channel_avail_list.__len__())
+			raw._raw_extras[0]['n_chan'] = channel_avail_list.__len__()
+			raw._raw_extras[0]['orig_n_chan'] = channel_avail_list.__len__()
 
 		#raw.info['chs'][0]['unit']
 	else:
@@ -295,7 +371,7 @@ def write_raw_to_edf(raw, filepath, format="zmax_edf"):
 	if (extension).lower() != ".edf":
 		warnings.warn("The filepath " + filepath + " does not seem to be an EDF file.")
 	if format == "zmax_edf":
-		channel_dimensions_zmax = {'BATT': 'V', 'BODY TEMP': "C", 'dX': "g", 'dY': "g", 'dZ': "g", 'EEG L': "uV", 'EEG R': "uV", 'LIGHT': "", 'NASAL L': "", 'NASAL R': "", 'NOISE': "", 'OXY_DARK_AC': "", 'OXY_DARK_DC': "", 'OXY_IR_AC': "", 'OXY_IR_DC': "", 'OXY_R_AC': "", 'OXY_R_DC': "", 'RSSI': "", 'PARSED_NASAL R': "", 'PARSED_OXY_IR_AC': "", 'PARSED_NASAL L': "", 'PARSED_HR_r': "bpm", 'PARSED_HR_r_strength': "", 'PARSED_OXY_R_AC': "", 'PARSED_HR_ir': "bpm", 'PARSED_HR_ir_strength': ""}
+		channel_dimensions_zmax = {'BATT': 'V', 'BODY TEMP': "C", 'dX': "g", 'dY': "g", 'dZ': "g", 'EEG L': "uV", 'EEG R': "uV", 'EEG R Cleaned': "uV", 'EEG L Cleaned': "uV", 'EEG R Cleaned_LFP': "uV", 'EEG L Cleaned_LFP': "uV", 'LIGHT': "", 'NASAL L': "", 'NASAL R': "", 'NOISE': "", 'OXY_DARK_AC': "", 'OXY_DARK_DC': "", 'OXY_IR_AC': "", 'OXY_IR_DC': "", 'OXY_R_AC': "", 'OXY_R_DC': "", 'RSSI': "", 'PARSED_NASAL R': "", 'PARSED_OXY_IR_AC': "", 'PARSED_NASAL L': "", 'PARSED_HR_r': "bpm", 'PARSED_HR_r_strength': "", 'PARSED_OXY_R_AC': "", 'PARSED_HR_ir': "bpm", 'PARSED_HR_ir_strength': ""}
 
 		#EDF_format_extention = ".edf"
 		EDF_format_filetype = pyedflib.FILETYPE_EDFPLUS
@@ -363,18 +439,18 @@ def write_raw_to_edf(raw, filepath, format="zmax_edf"):
 # =============================================================================
 #
 # =============================================================================
-def read_edf_to_raw_zipped(filepath, format="zmax_edf", zmax_ppgparser=False, zmax_ppgparser_exe_path=None, zmax_ppgparser_timeout_seconds=None, drop_zmax=['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']):
+def read_edf_to_raw_zipped(filepath, format="zmax_edf", zmax_ppgparser=False, zmax_ppgparser_exe_path=None, zmax_ppgparser_timeout_seconds=None, zmax_eegcleaner=False, zmax_eegcleaner_exe_path=None, zmax_eegcleaner_timeout_seconds=None, zmax_edfjoin_exe_path=None, zmax_edfjoin_timeout_seconds=None, zmax_edfjoin_keep=False, zmax_edfjoin_move_path=None, no_read=False, drop_zmax=['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']):
 	temp_dir = safe_zip_dir_extract(filepath)
 	raw = None
-	if format == "zmax_edf":
-		raw = read_edf_to_raw(temp_dir.name + os.sep + "EEG L.edf", format=format, zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout_seconds=zmax_ppgparser_timeout_seconds, drop_zmax=drop_zmax)
+	if format in ["zmax_edf", "zmax_edf_join"]:
+		raw = read_edf_to_raw(temp_dir.name + os.sep + "EEG L.edf", format=format, zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout_seconds=zmax_ppgparser_timeout_seconds, zmax_eegcleaner=zmax_eegcleaner, zmax_eegcleaner_exe_path=zmax_eegcleaner_exe_path, zmax_eegcleaner_timeout_seconds=zmax_eegcleaner_timeout_seconds, zmax_edfjoin_exe_path=zmax_edfjoin_exe_path, zmax_edfjoin_timeout_seconds=zmax_edfjoin_timeout_seconds, zmax_edfjoin_keep=zmax_edfjoin_keep, zmax_edfjoin_move_path=zmax_edfjoin_move_path, no_read=no_read, drop_zmax=drop_zmax)
 	elif format == "edf":
 		fileendings = ('*.edf', '*.EDF')
 		filepath_list_edfs = []
 		for fileending in fileendings:
 			filepath_list_edfs.extend(glob.glob(temp_dir.name + os.sep + fileending,recursive=True))
 		if filepath_list_edfs:
-			raw = read_edf_to_raw(filepath_list_edfs[0], format=format, zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout_seconds=zmax_ppgparser_timeout_seconds)
+			raw = read_edf_to_raw(filepath_list_edfs[0], format=format, zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout_seconds=zmax_ppgparser_timeout_seconds, zmax_eegcleaner=zmax_eegcleaner, zmax_eegcleaner_exe_path=zmax_eegcleaner_exe_path, zmax_eegcleaner_timeout_seconds=zmax_eegcleaner_timeout_seconds, zmax_edfjoin_exe_path=None, zmax_edfjoin_timeout_seconds=None, no_read=no_read)
 	safe_zip_dir_cleanup(temp_dir)
 	return raw
 
@@ -388,7 +464,7 @@ def write_raw_to_edf_zipped(raw, zippath, edf_filename=None, format="zmax_edf", 
 	else:
 		filepath = temp_dir.name + os.sep + fileparts(edf_filename)[1] + '.edf'
 	write_raw_to_edf(raw, filepath, format)
-	zip_directory(temp_dir.name, zippath, deletefolder=True, compresslevel=compresslevel)
+	zip_directory(temp_dir.name, zippath, deletefolder=False, compresslevel=compresslevel)
 	safe_zip_dir_cleanup(temp_dir)
 	return zippath
 
@@ -564,6 +640,30 @@ if __name__ == "__main__":
 					help='An optional timeout to run the ZMax PPGParser.exe in seconds. If empty no timeout is used')
 
 	# Switch
+	parser.add_argument('--zmax_edfjoin', action='store_true',
+					help='Switch to indicate if ZMax EDFJoin.exe is used to merge the converted ZMax EDF files. you also need to specify zmax_edfjoin_exe_path if it is not already in the current directory. This will take time to reprocess each data. Note that this will disable resampling or cleaning of empty channels or some skip some values in an entry of the summary csv')
+
+	# Optional argument
+	parser.add_argument('--zmax_edfjoin_exe_path', type=file_path,
+					help='direct and full path to the ZMax EDFJoin.exe in the Hypnodyne ZMax software folder')
+
+	# Optional argument
+	parser.add_argument('--zmax_edfjoin_timeout_seconds', type=float,
+					help='An optional timeout to run the ZMax EDFJoin.exe in seconds. If empty no timeout is used')
+
+	# Switch
+	parser.add_argument('--zmax_eegcleaner', action='store_true',
+					help='Switch to indicate if ZMax EDFCleaner.exe is used to clean the EEG channels from SD-card writing noise in 85.33 Hz and higher and lower harmonics (e.g. 42.66, 21.33, 10.66, 5.33 Hz...) you also need to specify zmax_eegcleaner_exe_path if it is not already in the current directory. This will take time to reprocess each data.')
+
+	# Optional argument
+	parser.add_argument('--zmax_eegcleaner_exe_path', type=file_path,
+					help='direct and full path to the ZMax EDFCleaner.exe in the Hypnodyne ZMax software folder')
+
+	# Optional argument
+	parser.add_argument('--zmax_eegcleaner_timeout_seconds', type=float,
+					help='An optional timeout to run the ZMax EDFCleaner.exe in seconds. If empty no timeout is used')
+
+	# Switch
 	parser.add_argument('--zmax_raw_hyp_file', action='store_true',
 					help='Switch to indicate if ZMax HDRecorder.exe is used to convert from .hyp files moved from the SD card. you need to specify zmax_hdrecorder_exe_path if it is not already in the current directory. This will take time to reprocess each data.')
 
@@ -597,11 +697,11 @@ if __name__ == "__main__":
 
 	# Switch
 	parser.add_argument('--read_only_EEG', action='store_true',
-					help='Switch to indicate if onlye "EEG L" and "EEG R" channels should be read in. --zmax_lite switch is invalidated by this')
+					help='Switch to indicate if only "EEG L" and "EEG R" channels should be read in. --zmax_lite switch is invalidated by this')
 
 	# Switch
 	parser.add_argument('--read_only_EEG_BATT', action='store_true',
-					help='Switch to indicate if onlye "EEG L" and "EEG R" and "BATT" channels should be read in. --zmax_lite switch and --read_only_EEG is invalidated by this')
+					help='Switch to indicate if only "EEG L" and "EEG R" and "BATT" channels should be read in. --zmax_lite switch and --read_only_EEG is invalidated by this')
 
 	# Switch
 	parser.add_argument('--no_write', action='store_true',
@@ -707,6 +807,30 @@ if __name__ == "__main__":
 	zmax_ppgparser_timeout_seconds = None # in seconds
 	if args.zmax_ppgparser_timeout_seconds is not None:
 		zmax_ppgparser_timeout_seconds = args.zmax_ppgparser_timeout_seconds
+
+	zmax_eegcleaner = False
+	if args.zmax_eegcleaner is not None:
+		zmax_eegcleaner = args.zmax_eegcleaner
+
+	zmax_eegcleaner_exe_path = application_path + os.sep + 'EDFCleaner.exe' # in the current working directory
+	if args.zmax_eegcleaner_exe_path is not None:
+		zmax_eegcleaner_exe_path = args.zmax_eegcleaner_exe_path
+
+	zmax_eegcleaner_timeout_seconds = None # in seconds
+	if args.zmax_eegcleaner_timeout_seconds is not None:
+		zmax_eegcleaner_timeout_seconds = args.zmax_eegcleaner_timeout_seconds
+
+	zmax_edfjoin = False
+	if args.zmax_edfjoin is not None:
+		zmax_edfjoin = args.zmax_edfjoin
+
+	zmax_edfjoin_exe_path = application_path + os.sep + 'EDFJoin.exe' # in the current working directory
+	if args.zmax_edfjoin_exe_path is not None:
+		zmax_edfjoin_exe_path = args.zmax_edfjoin_exe_path
+
+	zmax_edfjoin_timeout_seconds = None # in seconds
+	if args.zmax_edfjoin_timeout_seconds is not None:
+		zmax_edfjoin_timeout_seconds = args.zmax_edfjoin_timeout_seconds
 
 	zmax_raw_hyp_file = False
 	if args.zmax_raw_hyp_file is not None:
@@ -900,6 +1024,11 @@ if __name__ == "__main__":
 				parentfoldername = os.path.basename(path)
 				pathup, nametmp, extensiontmp = fileparts(path)
 
+				format = "zmax_edf"
+				zmax_edfjoin_move_path_subdir = None
+
+				rm_dir_list_inner = []
+
 				drop_channels = []
 				if isliteversion:
 					drop_channels = ['BODY TEMP', 'LIGHT', 'NASAL L', 'NASAL R', 'NOISE', 'OXY_DARK_AC', 'OXY_DARK_DC', 'OXY_R_AC', 'OXY_R_DC', 'RSSI', 'PARSED_NASAL R', 'PARSED_NASAL L', 'PARSED_OXY_R_AC', 'PARSED_HR_r', 'PARSED_HR_r_strength']
@@ -941,61 +1070,106 @@ if __name__ == "__main__":
 							continue
 
 					#reading
+					no_read = False
+					if zmax_edfjoin:
+						format = "zmax_edf_join"
+						path_temp, name_temp, ext_temp = fileparts(export_filepath_final_to_rename)
+						subdir_temp = path_temp + os.sep + temp_file_postfix
+						finaldir_temp = path_temp + os.sep
+						dir_path_create(subdir_temp)
+						zmax_edfjoin_move_path_subdir = subdir_temp + os.sep + name_temp + ".edf"
+						no_read = True
+						if no_write:
+							continue
+
 					if read_zip_temp and (not read_zip_temp_reset):
-						raw = read_edf_to_raw_zipped(filepath, format="zmax_edf", zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout_seconds=zmax_ppgparser_timeout_seconds, drop_zmax=drop_channels)
+						raw = read_edf_to_raw_zipped(filepath, format=format, zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout_seconds=zmax_ppgparser_timeout_seconds, zmax_eegcleaner=zmax_eegcleaner, zmax_eegcleaner_exe_path=zmax_eegcleaner_exe_path, zmax_eegcleaner_timeout_seconds=zmax_eegcleaner_timeout_seconds, zmax_edfjoin_exe_path=zmax_edfjoin_exe_path, zmax_edfjoin_timeout_seconds=zmax_edfjoin_timeout_seconds, zmax_edfjoin_keep=False, zmax_edfjoin_move_path=zmax_edfjoin_move_path_subdir, no_read=no_read, drop_zmax=drop_channels)
 					else:
-						raw = read_edf_to_raw(filepath, format="zmax_edf", zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout_seconds=zmax_ppgparser_timeout_seconds, drop_zmax = drop_channels)
+						raw = read_edf_to_raw(filepath, format=format, zmax_ppgparser=zmax_ppgparser, zmax_ppgparser_exe_path=zmax_ppgparser_exe_path, zmax_ppgparser_timeout_seconds=zmax_ppgparser_timeout_seconds, zmax_eegcleaner=zmax_eegcleaner, zmax_eegcleaner_exe_path=zmax_eegcleaner_exe_path, zmax_eegcleaner_timeout_seconds=zmax_eegcleaner_timeout_seconds, zmax_edfjoin_exe_path=zmax_edfjoin_exe_path, zmax_edfjoin_timeout_seconds=zmax_edfjoin_timeout_seconds, zmax_edfjoin_keep=False, zmax_edfjoin_move_path=zmax_edfjoin_move_path_subdir, no_read=no_read, drop_zmax = drop_channels)
+
+
+
 					print("READ %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
 					conversion_status = 'read_in'
 
-					# data hashing pre
-					if signal_hashing:
-						print("HASHING SIGNAL OF FILE %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
-						md5_signal_hash_before_conversion = get_raw_data_hash(raw, hash_function=hashlib.md5)
-						print("MD5 SIGNAL HASH: " + md5_signal_hash_before_conversion)
-						#raw_short_ori = raw.copy()
-						#raw_short_ori.crop(tmin=0, tmax=60*4)
-						#md5_signal_hash_before_conversion_short_ori = get_raw_data_hash(raw_short_ori, hash_function=hashlib.md5)
-						#raw_short_crop = raw.copy()
-						#raw_short_crop.crop(tmin=2.671875, tmax=60*4)
-						#md5_signal_hash_before_conversion_short_crop = get_raw_data_hash(raw_short_crop, hash_function=hashlib.md5)
 
+					if zmax_edfjoin:
+						zmax_edfjoin_move_path_subdir = raw
+						if raw is None:
+							continue
+						joined_filepath_moved_to_rename = zmax_edfjoin_move_path_subdir.replace(temp_file_postfix+os.sep,'')
+						#joined_filepath_moved_final = joined_filepath_moved_final.replace(temp_file_postfix,'')
+						try:
+							if not write_zip:
+								export_filepath_final_to_rename = shutil.move(zmax_edfjoin_move_path_subdir, joined_filepath_moved_to_rename)
+							else:
+								path_tmp, name_tmp, ext_tmp = fileparts(zmax_edfjoin_move_path_subdir)
+								name_tmp_final = name_tmp.replace(temp_file_postfix,'')
+								joined_filepath_moved_final_subdir_final = path_tmp + os.sep + name_tmp_final + ext_tmp
+								joined_filepath_moved_final_subdir_final = shutil.move(zmax_edfjoin_move_path_subdir, joined_filepath_moved_final_subdir_final)
+								path_temp, name_temp, ext_temp = fileparts(joined_filepath_moved_final_subdir_final)
+								joined_filepath_moved_final_subdir_final_zip = path_temp + os.sep + name_temp + temp_file_postfix + '.zip'
+								joined_filepath_moved_final_subdir_final_zip = zip_file(joined_filepath_moved_final_subdir_final, joined_filepath_moved_final_subdir_final_zip, deletefile=True, compresslevel=6)
+								#os.remove(joined_filepath_moved_final_subdir_final)
+								export_filepath_final_to_rename = joined_filepath_moved_final_subdir_final_zip.replace(temp_file_postfix+os.sep,'')
+								shutil.move(joined_filepath_moved_final_subdir_final_zip, export_filepath_final_to_rename)
+								try:
+									shutil.rmtree(path_tmp, ignore_errors=True)
+								except Exception:
+									rm_dir_list_inner.extend([path_tmp])
+									print('FAILED TO remove temporary folder %s for filepath %s but will try again once more later.' % (path_tmp, filepath))
+									print(traceback.format_exc())
+						except Exception:
+							print('FAILED TO MOVE or ZIP THE file %s to %s or its zipped form.' % (filepath, joined_filepath_moved_to_rename))
+							print(traceback.format_exc())
+					else:
+						# data hashing pre
+						if signal_hashing:
+							print("HASHING SIGNAL OF FILE %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
+							md5_signal_hash_before_conversion = get_raw_data_hash(raw, hash_function=hashlib.md5)
+							print("MD5 SIGNAL HASH: " + md5_signal_hash_before_conversion)
+							#raw_short_ori = raw.copy()
+							#raw_short_ori.crop(tmin=0, tmax=60*4)
+							#md5_signal_hash_before_conversion_short_ori = get_raw_data_hash(raw_short_ori, hash_function=hashlib.md5)
+							#raw_short_crop = raw.copy()
+							#raw_short_crop.crop(tmin=2.671875, tmax=60*4)
+							#md5_signal_hash_before_conversion_short_crop = get_raw_data_hash(raw_short_crop, hash_function=hashlib.md5)
 
-					rec_start_datetime = raw.info['meas_date']
-					rec_stop_datetime = rec_start_datetime + datetime.timedelta(seconds=(raw._last_time - raw._first_time))
-					rec_duration_datetime = datetime.timedelta(seconds=(raw._last_time - raw._first_time))
-					rec_duration_seconds = rec_duration_datetime.total_seconds()
-					rec_n_samples = raw.n_times
-					rec_battery_at_end = raw_zmax_data_quality(raw)
+						rec_start_datetime = raw.info['meas_date']
+						rec_stop_datetime = rec_start_datetime + datetime.timedelta(seconds=(raw._last_time - raw._first_time))
+						rec_duration_datetime = datetime.timedelta(seconds=(raw._last_time - raw._first_time))
+						rec_duration_seconds = rec_duration_datetime.total_seconds()
+						rec_n_samples = raw.n_times
+						rec_battery_at_end = raw_zmax_data_quality(raw)
 
-					if exclude_empty_channels:
-						flat_channel_names = []
-						for iCh, ch_name in enumerate(raw.info['ch_names']):
-							ch_name = raw.info['ch_names'][iCh]
-							nNotFlat = numpy.count_nonzero(raw._data[iCh]-statistics.median(raw._data[iCh])) # this is fastest so far
-							if nNotFlat <= 10:
-								flat_channel_names.append(ch_name)
-						raw.drop_channels(flat_channel_names)
+						if exclude_empty_channels:
+							flat_channel_names = []
+							for iCh, ch_name in enumerate(raw.info['ch_names']):
+								ch_name = raw.info['ch_names'][iCh]
+								nNotFlat = numpy.count_nonzero(raw._data[iCh]-statistics.median(raw._data[iCh])) # this is fastest so far
+								if nNotFlat <= 10:
+									flat_channel_names.append(ch_name)
+							raw.drop_channels(flat_channel_names)
 
-					if resample_Hz is not None:
-						raw = raw.resample(resample_Hz)
+						if resample_Hz is not None:
+							raw = raw.resample(resample_Hz)
 
-					sampling_rate_final_Hz = raw.info['sfreq']
+						sampling_rate_final_Hz = raw.info['sfreq']
 
-					# file hashing original
-					if file_hashing:
-						print("HASHING FILE %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
-						md5_file_original_hash = get_file_hash(filepath, chunk_size_bytes=65536, hash_function=hashlib.md5)
-						print("MD5 FILE HASH: " + md5_file_original_hash)
+						# file hashing original
+						if file_hashing:
+							print("HASHING FILE %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
+							md5_file_original_hash = get_file_hash(filepath, chunk_size_bytes=65536, hash_function=hashlib.md5)
+							print("MD5 FILE HASH: " + md5_file_original_hash)
 
-					# data hashing post
-					if signal_hashing:
-						print("HASHING SIGNAL (after conversion) OF FILE %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
-						md5_signal_hash_after_conversion = get_raw_data_hash(raw, hash_function=hashlib.md5)
-						print("MD5 SIGNAL HASH: " + md5_signal_hash_after_conversion)
+						# data hashing post
+						if signal_hashing:
+							print("HASHING SIGNAL (after conversion) OF FILE %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
+							md5_signal_hash_after_conversion = get_raw_data_hash(raw, hash_function=hashlib.md5)
+							print("MD5 SIGNAL HASH: " + md5_signal_hash_after_conversion)
 
-					conversion_status = 'read_in_processed'
-					#writing
+						conversion_status = 'read_in_processed'
+
 					#writing
 					if not no_write:
 						# check again just before writing
@@ -1004,11 +1178,12 @@ if __name__ == "__main__":
 								print('skipping file: %s' % export_filepath_final)
 								continue
 						print("Attempting to write %d of %d: '%s' " % (i+1, number_of_conversions, export_filepath_final))
-						if write_zip:
-							export_filepath_final_to_rename_2 = write_raw_to_edf_zipped(raw, export_filepath_final_to_rename, edf_filename=export_filepath_final, format="zmax_edf") # treat as a speacial zmax read EDF for export
-						else:
-							export_filepath_final_to_rename_2 = write_raw_to_edf(raw, export_filepath_final_to_rename, format="zmax_edf")  # treat as a speacial zmax read EDF for export
-						conversion_status = 'read_in_processed_written_temp'
+						if not zmax_edfjoin:
+							if write_zip:
+								export_filepath_final_to_rename_2 = write_raw_to_edf_zipped(raw, export_filepath_final_to_rename, edf_filename=export_filepath_final, format="zmax_edf") # treat as a speacial zmax read EDF for export
+							else:
+								export_filepath_final_to_rename_2 = write_raw_to_edf(raw, export_filepath_final_to_rename, format="zmax_edf")  # treat as a speacial zmax read EDF for export
+							conversion_status = 'read_in_processed_written_temp'
 						try:
 							# check again just before writing
 							if no_overwrite:
@@ -1043,6 +1218,13 @@ if __name__ == "__main__":
 				except Exception as e:
 					print(traceback.format_exc())
 					print("FAILED %d of %d: '%s' " % (i+1, number_of_conversions, filepath))
+
+				for dp in rm_dir_list_inner:
+					try:
+						shutil.rmtree(dp)
+					except Exception:
+						print('FAILED TO DELETE THE LEFT TEMPORARY DIRECTORY: %s' % dp)
+						print(traceback.format_exc())
 
 				# write to summary
 				if (not no_summary_csv) and processing_started:
